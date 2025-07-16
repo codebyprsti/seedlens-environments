@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Body
-from api.v1.endpoints import upload, category, full_data, category_filter_router, views, add_record
+from api.v1.endpoints import upload, category, full_data, category_filter_router, views, add_record, inspection
 
 
 
@@ -11,4 +11,6 @@ api_router.include_router(category.router, tags=["Category"])
 api_router.include_router(full_data.router, tags=["Full Data"])
 api_router.include_router(category_filter_router.router, tags=["Category filters"])
 api_router.include_router(views.router, tags=["Views"])
+api_router.include_router(inspection.router, tags=["Inspection Data"])
+
 

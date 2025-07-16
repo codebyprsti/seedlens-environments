@@ -1,6 +1,8 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, validator, Field, field_validator
+from sqlalchemy import Column, String, Float, Integer, DateTime, ForeignKey, Index
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+
 
 
 class BaseSchema(BaseModel):
@@ -222,7 +224,7 @@ class UploadResponse(BaseSchema):
     message: str
     inserted_records: Dict[str, int]
     total_rows_processed: int
-    errors: List[str] = []
+    # errors: List[str] = []
 
 
 class ExcelValidationError(BaseSchema):
@@ -240,23 +242,23 @@ class ValidationReport(BaseSchema):
 
 
 class SeasonCropInspectionBaseCreate(BaseSchema):
-    season_id: str
-    crop_id: str
-    variety_id: str
-    location_id: str
-    grower_id: str
-    organizer_id: Optional[str]
+    season_id: Optional[str] = None
+    crop_id:Optional[str] = None
+    variety_id: Optional[str] = None
+    location_id: Optional[str] = None
+    grower_id: Optional[str] = None
+    organizer_id: Optional[str] = None
     lot_id: Optional[str]
 
     hybrid_id: Optional[str]
     organizer_name: Optional[str]
     grower_name: Optional[str]
     grower_gender: Optional[str]
-    purchasing_document_number: Optional[str]
+    purchasing_document_number: Optional[float]
     fathers_name: Optional[str]
     village: Optional[str]
     mandal: Optional[str]
-    taluka_id: Optional[str]
+    mandal_id: Optional[str]
     district: Optional[str]
     district_id: Optional[str]
     state: Optional[str]
@@ -274,3 +276,138 @@ class SeasonCropInspectionBaseCreate(BaseSchema):
     production_officer: Optional[str]
     tfa_name: Optional[str]
     production_plant: Optional[str]
+
+
+
+class YieldRecordBase(BaseModel):
+    grower_id: str = Field(..., description="Grower ID")
+    crop_id: str = Field(..., description="Crop ID")
+    lot_id: str = Field(..., description="Lot ID")
+    season_id: str = Field(..., description="Season ID")
+    variety_id: str = Field(..., description="Variety ID")
+
+    physical_received_qty_as_per_sap: Optional[float] = None
+    packed_qt: Optional[float] = None
+    productvit: Optional[float] = None
+    slab: Optional[str] = None
+    pos_done_b: Optional[str] = None
+    production_manager: Optional[str] = None
+    production_plant: Optional[str] = None
+    production_location: Optional[str] = None
+    production_co: Optional[str] = None
+    po_soaking_acres: Optional[float] = None
+    purchase_order: Optional[str] = None
+    planting_list_soaking_acres: Optional[float] = None
+    net_acres: Optional[float] = None
+    tp_days: Optional[int] = None
+    tp_days_slab: Optional[str] = None
+
+    @validator('grower_id', 'crop_id', 'lot_id', 'season_id', 'variety_id')
+    def not_empty(cls, v):
+        if not v or v.strip() == '':
+            raise ValueError("Required field cannot be empty")
+        return v.strip()
+
+    @validator(
+        'physical_received_qty_as_per_sap', 'packed_qt', 'productvit',
+        'po_soaking_acres', 'planting_list_soaking_acres', 'net_acres'
+    )
+    def non_negative_float(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("Values cannot be negative")
+        return v
+
+    @validator('tp_days')
+    def non_negative_int(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("TP days cannot be negative")
+        return v
+
+class YieldRecordCreate(YieldRecordBase):
+    pass
+
+class YieldRecordUpdate(BaseModel):
+    physical_received_qty_as_per_sap: Optional[float]
+    packed_qt: Optional[float]
+    productvit: Optional[float]
+    slab: Optional[str]
+    pos_done_b: Optional[str]
+    production_manager: Optional[str]
+    production_plant: Optional[str]
+    production_location: Optional[str]
+    production_co: Optional[str]
+    po_soaking_acres: Optional[float]
+    purchase_order: Optional[str]
+    planting_list_soaking_acres: Optional[float]
+    net_acres: Optional[float]
+    tp_days: Optional[int]
+    tp_days_slab: Optional[str]
+
+class YieldRecordResponse(YieldRecordBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True
+
+    @field_validator('production_co', mode='before')
+    def validate_production_co(cls, v):
+        if v is None:
+            return v
+        return str(v)
+
+class SeasonCropInspectionBaseOut(BaseModel):
+    crop_id: int
+    season_id: int
+    grower_id: int
+    lot_id: int
+    variety_id: int
+    organizer_name: str
+    grower_name: str
+    grower_gender: str
+    fathers_name: str
+    village: str
+    mandal: str
+    district: str
+    state: str
+    male_soaking_acre: float
+    male_no_of_pkt: int
+    male_qty: float
+    female_soaking_acre: float
+    female_no_of_pkt: int
+    female_qty: float
+
+class SeasonCropInspectionResponse(BaseModel):
+    crop_id: Optional[str]
+    season_id: Optional[str]
+    grower_id: Optional[str]
+    lot_id: Optional[str]
+    variety_id: Optional[str]
+    organizer_name: Optional[str]
+    grower_name: Optional[str]
+    grower_gender: Optional[str]
+    fathers_name: Optional[str]
+    village: Optional[str]
+    mandal: Optional[str]
+    district: Optional[str]
+    state: Optional[str]
+    male_soaking_acre: Optional[float]
+    male_no_of_pkt: Optional[float]
+    male_qty: Optional[float]
+    female_soaking_acre: Optional[float]
+    female_no_of_pkt: Optional[float]
+    female_qty: Optional[float]
+
+    class Config:
+        orm_mode = True
+# class DynamicYieldRecordSchema(BaseModel):
+#     grower_id: str
+#     crop_id: str
+#     lot_id: str
+#     season_id: str
+#     variety_id: str
+#     yield_data: Optional[dict] = Field(default_factory=dict)
+#
+#     class Config:
+#         orm_mode = True

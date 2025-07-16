@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Float, Boolean, Text
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Float, Boolean, Text, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -314,24 +314,23 @@ class SeasonCropInspectionBase(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    season_id = Column(String(20), nullable=False)
-    crop_id = Column(String(20), ForeignKey("operations.crops.crop_id"), nullable=False)
-    variety_id = Column(String(20), ForeignKey("operations.varieties.variety_id"), nullable=False)
-    location_id = Column(String(20), ForeignKey("operations.locations.location_id"), nullable=False)
-    grower_id = Column(String(20), ForeignKey("operations.growers.grower_id"), nullable=False)
+    season_id = Column(String(20), nullable=True)
+    crop_id = Column(String(20), ForeignKey("operations.crops.crop_id"), nullable=True)
+    variety_id = Column(String(20), ForeignKey("operations.varieties.variety_id"), nullable=True)
+    location_id = Column(String(20), ForeignKey("operations.locations.location_id"), nullable=True)
+    grower_id = Column(String(20), ForeignKey("operations.growers.grower_id"), nullable=True)
     organizer_id = Column(String(20), ForeignKey("operations.organizers.organizer_id"))
-    category_id = Column(Integer, ForeignKey("operations.categories.category_id"), nullable=False)
     lot_id = Column(String(50), nullable=True)
 
     hybrid_id = Column(String(50), nullable=True)
     organizer_name = Column(String(100), nullable=True)
     grower_name = Column(String(100), nullable=True)
     grower_gender = Column(String(10), nullable=True)
-    purchasing_document_number = Column(String(50), nullable=True)
+    purchasing_document_number = Column(Float, nullable=True)
     fathers_name = Column(String(100), nullable=True)
     village = Column(String(100), nullable=True)
     mandal = Column(String(100), nullable=True)
-    taluka_id = Column(String(20), nullable=True)
+    mandal_id = Column(String(20), nullable=True)
     district = Column(String(100), nullable=True)
     district_id = Column(String(20), nullable=True)
     state = Column(String(100), nullable=True)
@@ -361,6 +360,49 @@ class SeasonCropInspectionBase(Base):
     grower = relationship("GrowerRecord", back_populates="inspections")
     organizer = relationship("OrganizerRecord", back_populates="inspections")
 
+
+class YieldRecord(Base):
+    __tablename__ = 'yield_records'
+    __table_args__ = (
+        Index('idx_yield_composite', 'grower_id', 'crop_id', 'lot_id', 'season_id', 'variety_id'),
+        Index('idx_yield_grower_season', 'grower_id', 'season_id'),
+        Index('idx_yield_crop_variety', 'crop_id', 'variety_id'),
+        {'schema': 'operations'}
+    )
+
+    # Primary Key
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Foreign Key Identifiers (adjust or remove ForeignKey if not available in DB)
+    grower_id = Column(String(50), ForeignKey('operations.growers.grower_id'), nullable=False)
+    crop_id = Column(String(50), ForeignKey('operations.crops.crop_id'), nullable=False)
+    lot_id = Column(String(100), nullable=False)
+    season_id = Column(String(50), nullable=False)
+    variety_id = Column(String(50), ForeignKey('operations.varieties.variety_id'), nullable=False)
+
+    # Yield-specific fields
+    physical_received_qty_as_per_sap = Column(Float, nullable=True)
+    packed_qt = Column(Float, nullable=True)
+    productvit = Column(Float, nullable=True)
+    slab = Column(String(50), nullable=True)
+    pos_done_b = Column(String(100), nullable=True)
+    production_manager = Column(String(100), nullable=True)
+    production_plant = Column(String(100), nullable=True)
+    production_location = Column(String(100), nullable=True)
+    production_co = Column(String(100), nullable=True)
+    po_soaking_acres = Column(Float, nullable=True)
+    purchase_order = Column(String(100), nullable=True)
+    planting_list_soaking_acres = Column(Float, nullable=True)
+    net_acres = Column(Float, nullable=True)
+    tp_days = Column(Integer, nullable=True)
+    tp_days_slab = Column(String(50), nullable=True)
+
+    # Audit Fields
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<YieldRecord(grower_id={self.grower_id}, crop_id={self.crop_id}, lot_id={self.lot_id})>"
 # Create tables
 # CategoryRecord.__table__.create(bind=engine, checkfirst=True)
 # ColumnMetadataRecord.__table__.create(bind=engine, checkfirst=True)
@@ -370,3 +412,4 @@ class SeasonCropInspectionBase(Base):
 # GrowerRecord.__table__.create(bind=engine, checkfirst=True)
 # OrganizerRecord.__table__.create(bind=engine, checkfirst=True)
 # SeasonCropInspectionBase.__table__.create(bind=engine, checkfirst=True)
+# YieldRecord.__table__.create(bind=engine, checkfirst=True)

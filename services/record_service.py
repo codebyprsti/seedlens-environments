@@ -1,13 +1,15 @@
 import pandas as pd
 import logging
 from typing import Dict, List, Tuple, Optional, Any
+from services.yield_service import YieldService  # Adjust import path
+import numpy as np
 
 from sqlalchemy import MetaData
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from models.db_models import (
     CropRecord, VarietyRecord, LocationRecord,
-    GrowerRecord, OrganizerRecord, SeasonCropInspectionBase
+    GrowerRecord, OrganizerRecord, SeasonCropInspectionBase, YieldRecord
 )
 from services.inspection_service import InspectionLevelProcessor
 from models.schemas.base import (
@@ -16,7 +18,8 @@ from models.schemas.base import (
     LocationRecordCreate,
     GrowerRecordCreate,
     OrganizerRecordCreate,
-    SeasonCropInspectionBaseCreate
+    SeasonCropInspectionBaseCreate,
+    YieldRecordCreate
 )
 from core.db import SessionLocal, engine
 # from services.record_service import RecordService
@@ -31,6 +34,10 @@ logger = logging.getLogger(__name__)
 class RecordService:
     def __init__(self, db: Session):
         self.db = db
+        self.REQUIRED_FIELDS = {"season_id", "crop_id", "variety_id", "location_id", "grower_id"}
+        self.FLOAT_FIELDS = {
+    "male_soaking_acre", "male_no_of_pkt", "male_qty_in_kgs",
+    "female_soaking_acre", "female_no_of_pkt", "female_qty_in_kgs"}
         self.rename_map = {
         'crop': 'crop_name',
         'hsp_code': 'variety_name',
@@ -149,13 +156,20 @@ class RecordService:
             logger.error(f"Error loading Excel file: {str(e)}")
             raise ValueError(f"Failed to load Excel file: {str(e)}")
 
-    def clean_null_values(self,record: dict) -> dict:
+    def clean_null_values(self, record: dict) -> dict:
+        clean_record = {}
         for key, value in record.items():
-            if isinstance(value, float) and pd.isna(value):
-                record[key] = None
-            elif value == 'nan':
-                record[key] = None
-        return record
+            if str(value).strip() in {"", "NULL", "null", "None", "nan"} or value is None:
+                clean_record[key] = None
+            elif key in self.FLOAT_FIELDS:
+                try:
+                    clean_record[key] = float(value)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid float for field '{key}': {value}")
+                    clean_record[key] = None  # or skip the record entirely
+            else:
+                clean_record[key] = value
+        return clean_record
 
     def bulk_insert_inspection_base(self, base_records: List[Dict]) -> int:
         """
@@ -199,6 +213,9 @@ class RecordService:
             for record in new_records:
                 try:
                     record = self.clean_null_values(record)
+                    if any(record.get(field) is None for field in self.REQUIRED_FIELDS):
+                        logger.warning(f"Skipping record due to missing required fields: {record}")
+                        continue
                     base_schema = SeasonCropInspectionBaseCreate(**record)
                     validated_records.append(SeasonCropInspectionBase(**base_schema.dict()))
                 except Exception as e:
@@ -237,7 +254,7 @@ class RecordService:
 
     def extract_unique_records(self, df: pd.DataFrame) -> Dict[str, List[Dict]]:
         """
-        Extract unique records for foundation tables + base + inspection from the DataFrame.
+        Extract unique records for foundation tables + base + inspection + yield from the DataFrame.
         """
         unique_records = {
             'crops': [],
@@ -246,7 +263,8 @@ class RecordService:
             'growers': [],
             'organizers': [],
             'inspection_base': [],
-            'inspection_final': []
+            'inspection_final': [],
+            'yield_data': []  # Add yield data
         }
 
         try:
@@ -284,7 +302,8 @@ class RecordService:
                     variety.pop('crop_name', None)  # r
 
                 # Generate variety_id: VR_1001, VR_1002, ...
-                varieties_with_ids = self._generate_sequential_ids(normalized_varieties, prefix="VR_", start=1001, pad=4,
+                varieties_with_ids = self._generate_sequential_ids(normalized_varieties, prefix="VR_", start=1001,
+                                                                   pad=4,
                                                                    id_key="variety_id")
                 unique_records['varieties'] = varieties_with_ids
                 variety_name_to_id = {
@@ -317,7 +336,7 @@ class RecordService:
             if organizer_columns:
                 organizers_df = df[organizer_columns].drop_duplicates().dropna(subset=['org_id'])
                 organizers_df["category_id"] = 100006
-                records =  organizers_df.to_dict('records')
+                records = organizers_df.to_dict('records')
                 unique_records['organizers'] = [self.normalize_keys(r) for r in records]
 
             all_columns = df.columns.tolist()
@@ -402,8 +421,12 @@ class RecordService:
 
             # Convert to records
             records = final_df.to_dict('records')
-            unique_records['inspection_final'] = [self.normalize_keys(r) for r in records]            # Extract full inspection data
+            unique_records['inspection_final'] = [self.normalize_keys(r) for r in records]
 
+            # NEW: Extract yield data using YieldService
+            yield_service = YieldService()
+            yield_data_result = yield_service.extract_yield_data(final_df)
+            unique_records['yield_data'] = yield_data_result['yield_data']
 
             # Log extraction summary
             for table, records in unique_records.items():
@@ -680,6 +703,81 @@ class RecordService:
             self.db.rollback()
             raise
 
+    def bulk_insert_yield_records(self, yield_records: List[Dict]) -> int:
+        """
+        Bulk insert yield records with deduplication and validation.
+        """
+        try:
+            if not yield_records:
+                return 0
+
+            # Fetch existing composite keys to avoid duplicate inserts
+            existing_keys = set(
+                tuple(r) for r in self.db.query(
+                    YieldRecord.grower_id,
+                    YieldRecord.crop_id,
+                    YieldRecord.lot_id,
+                    YieldRecord.season_id,
+                    YieldRecord.variety_id
+                ).all()
+            )
+
+            # Deduplicate incoming records
+            def record_key(rec: Dict):
+                return (
+                    rec.get("grower_id"),
+                    rec.get("crop_id"),
+                    rec.get("lot_id"),
+                    rec.get("season_id"),
+                    rec.get("variety_id")
+                )
+
+            new_records = [
+                r for r in yield_records if record_key(r) not in existing_keys
+            ]
+
+            new_df = pd.DataFrame(new_records)
+            new_df = new_df.drop_duplicates(
+                subset=["grower_id", "crop_id", "lot_id", "season_id", "variety_id"]
+            )
+            new_records = new_df.to_dict(orient="records")
+
+            if not new_records:
+                logger.info("No new yield records to insert")
+                return 0
+
+            # Validate and transform
+            validated_yield_records = []
+            for record in new_records:
+                try:
+                    string_fields = [
+                        'production_co', 'purchase_order', 'slab', 'tp_days_slab',
+                        'production_location', 'production_manager', 'pos_done_b'
+                    ]
+
+                    for field in string_fields:
+                        if field in record and record[field] is not None:
+                            record[field] = str(record[field])
+
+                    validated = YieldRecordCreate(**record)
+                    validated_yield_records.append(YieldRecord(**validated.dict()))
+                except Exception as e:
+                    logger.warning(f"Invalid yield record skipped: {record} — Error: {str(e)}")
+                    continue
+
+            if validated_yield_records:
+                self.db.bulk_save_objects(validated_yield_records)
+                self.db.commit()
+                self.processed_counts["yield"] = len(validated_yield_records)
+                logger.info(f"Inserted {len(validated_yield_records)} yield records")
+
+            return len(validated_yield_records)
+
+        except Exception as e:
+            logger.error(f"Error bulk inserting yield records: {str(e)}")
+            self.db.rollback()
+            raise
+
 
 class EnhancedRecordService(RecordService):
     """Enhanced RecordService with dynamic inspection level support"""
@@ -769,11 +867,12 @@ try:
 
 
     # You can then extract and insert data like this:
+    # service.bulk_insert_yield_records(unique_records['yield_data'])
     # unique_records = service.extract_unique_records(df)
-    # service.bulk_insert_inspection_base(unique_records['inspection_base'])
+    service.bulk_insert_inspection_base(unique_records['inspection_base'])
     # service.bulk_insert_crops(unique_records['crops'])
     # service.bulk_insert_varieties(unique_records['varieties'])
-    service.bulk_insert_locations(unique_records['locations'])
+    # service.bulk_insert_locations(unique_records['locations'])
     # service.bulk_insert_growers(unique_records['growers'])
     # service.bulk_insert_organizers(unique_records['organizers'])
     # service.bulk_insert_inspection_base(unique_records['inspection_base'])

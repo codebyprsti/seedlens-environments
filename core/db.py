@@ -29,3 +29,10 @@ def get_connection():
 
 def release_connection(conn):
     db_pool.putconn(conn)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
