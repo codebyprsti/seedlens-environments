@@ -247,7 +247,6 @@ class SeasonCropInspectionBaseCreate(BaseSchema):
     grower_id: str
     organizer_id: Optional[str]
     lot_id: Optional[str]
-    category_id: int = Field(..., description="Associated category ID")
 
     hybrid_id: Optional[str]
     organizer_name: Optional[str]
@@ -257,7 +256,7 @@ class SeasonCropInspectionBaseCreate(BaseSchema):
     fathers_name: Optional[str]
     village: Optional[str]
     mandal: Optional[str]
-    mandal_id: Optional[str]
+    taluka_id: Optional[str]
     district: Optional[str]
     district_id: Optional[str]
     state: Optional[str]

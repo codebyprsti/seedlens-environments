@@ -36,6 +36,7 @@ class RecordService:
         'hsp_code': 'variety_name',
         'village_id': 'location_id',
         'taluka_mandal': 'mandal',
+        'taluka_id': 'mandal_id',
         'father_s_name': 'fathers_name',
         'org_id': 'organizer_id',
         'yield_production_plant': 'production_plant'
@@ -293,10 +294,11 @@ class RecordService:
 
             # Extract unique locations
             location_columns = self._find_columns(df, [
-                'village_id', 'village', 'taluka_mandal', 'district', 'state'
+                'village_id', 'village', 'taluka_mandal', 'district', 'state', 'taluka_id', 'district_id'
             ])
             if location_columns:
                 locations_df = df[location_columns].drop_duplicates().dropna(subset=['village_id'])
+                locations_df["category_id"] = 100004
                 records = locations_df.to_dict('records')
                 unique_records['locations'] = [self.normalize_keys(r) for r in records]
 
@@ -306,6 +308,7 @@ class RecordService:
             ])
             if grower_columns:
                 growers_df = df[grower_columns].drop_duplicates().dropna(subset=['grower_id'])
+                growers_df["category_id"] = 100005
                 records = growers_df.to_dict('records')
                 unique_records['growers'] = [self.normalize_keys(r) for r in records]
 
@@ -313,6 +316,7 @@ class RecordService:
             organizer_columns = self._find_columns(df, ['org_id', 'organizer_name', 'yield_production_plant'])
             if organizer_columns:
                 organizers_df = df[organizer_columns].drop_duplicates().dropna(subset=['org_id'])
+                organizers_df["category_id"] = 100006
                 records =  organizers_df.to_dict('records')
                 unique_records['organizers'] = [self.normalize_keys(r) for r in records]
 
@@ -328,6 +332,7 @@ class RecordService:
             # Extract season_crop_inspection_base data
             if base_columns:
                 base_df = df[base_columns].drop_duplicates()
+                base_df.columns = [col.strip("_") for col in base_df.columns if col]
 
                 base_df = base_df.rename(columns={
                     'season': 'season_id',
@@ -719,7 +724,7 @@ class EnhancedRecordService(RecordService):
 
             # Insert inspection level data
             inserted_counts = self.inspection_processor.bulk_insert_inspection_level_data(
-                level_dataframes, base_inspection_mapping
+                level_dataframes
             )
             results['inserted_counts'] = inserted_counts
 
@@ -756,22 +761,22 @@ try:
     record_service = EnhancedRecordService(db, metadata)
 
     # Step 3: Call the method
-    df, mapping = service.load_and_process_excel(file_path="C:\\Users\\madan\\Downloads\\Rabi 24-25 formatted report.csv")
+    df, mapping = service.load_and_process_excel(file_path="C:\\Users\\madan\\Downloads\\Rabi 24-25 formatted report latest.csv")
     unique_records, df = service.extract_unique_records(df)
 
 
-    inspection_results = record_service.process_inspection_levels(df, engine)
+    # inspection_results = record_service.process_inspection_levels(df, engine)
 
 
     # You can then extract and insert data like this:
-    unique_records = service.extract_unique_records(df)
+    # unique_records = service.extract_unique_records(df)
     # service.bulk_insert_inspection_base(unique_records['inspection_base'])
     # service.bulk_insert_crops(unique_records['crops'])
     # service.bulk_insert_varieties(unique_records['varieties'])
-    # service.bulk_insert_locations(unique_records['locations'])
-    service.bulk_insert_growers(unique_records['growers'])
-    service.bulk_insert_organizers(unique_records['organizers'])
-    service.bulk_insert_inspection_base(unique_records['inspection_base'])
+    service.bulk_insert_locations(unique_records['locations'])
+    # service.bulk_insert_growers(unique_records['growers'])
+    # service.bulk_insert_organizers(unique_records['organizers'])
+    # service.bulk_insert_inspection_base(unique_records['inspection_base'])
 
 
 finally:

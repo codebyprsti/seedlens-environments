@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple, Optional, Any, Set
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, create_engine, MetaData, Table
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, relationship
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 import re
 from datetime import datetime
 from dataclasses import dataclass
@@ -269,6 +269,9 @@ class InspectionLevelProcessor:
             # Add metadata columns
             level_df['inspection_level'] = level
             level_df['id'] = [f"IL{level}_{i:06d}" for i in range(len(level_df))]
+            for col in level_df.columns:
+                if 'date' in col.lower():
+                    level_df[col] = pd.to_datetime(level_df[col], dayfirst=True, errors='coerce')
 
             # Filter out rows where all inspection-specific columns are null
             inspection_field_names = [rename_dict[col] for col in inspection_columns]
@@ -304,76 +307,65 @@ class InspectionLevelProcessor:
 
     def sanitize_record(self, record: dict) -> dict:
         """
-        Convert Pandas NaN to None and ensure all values are valid Python native types
+        Ensure all values in the record are SQLAlchemy-compatible with proper NULL handling
         """
         sanitized = {}
         for k, v in record.items():
-            if isinstance(v, float) and np.isnan(v):
+            if v is None or pd.isna(v):  # Explicit None check + pandas NA
                 sanitized[k] = None
+            elif isinstance(v, (np.integer, np.int64)):
+                sanitized[k] = int(v)
+            elif isinstance(v, (np.floating, np.float64)):
+                sanitized[k] = float(v)
+            elif isinstance(v, np.bool_):
+                sanitized[k] = bool(v)
             elif isinstance(v, pd.Timestamp):
-                sanitized[k] = v.to_pydatetime()  # Convert to datetime object (not string)
+                sanitized[k] = v.to_pydatetime()
+            elif isinstance(v, (list, dict, np.ndarray)):
+                sanitized[k] = str(v)  # Serialize complex objects
             else:
                 sanitized[k] = v
         return sanitized
 
-    def bulk_insert_inspection_level_data(self, level_dataframes: Dict[int, pd.DataFrame],
-                                          base_inspection_mapping: Dict[str, str]) -> Dict[int, int]:
+    def bulk_insert_inspection_level_data(self, level_dataframes: Dict[int, pd.DataFrame]) -> Dict[int, int]:
         """
-        Bulk insert inspection level data into respective tables
-
-        Args:
-            level_dataframes: Dict of level -> DataFrame
-            base_inspection_mapping: Mapping from key to base_inspection_id
-
-        Returns:
-            Dict of level -> number of records inserted
+        Simplified version without base_inspection mapping
         """
         inserted_counts = {}
 
         for level, level_df in level_dataframes.items():
             try:
-                # Get the table for this level
                 table_name = f"inspection_level_{level}"
                 table = self.dynamic_model_factory.created_tables.get(table_name)
 
                 if not isinstance(table, Table):
-                    logger.warning(f"Table not found or invalid for inspection level {level}")
+                    logger.warning(f"Table not found for level {level}")
                     inserted_counts[level] = 0
                     continue
+
+                # Remove any reference to base_inspection_id in the DataFrame
+                if 'base_inspection_id' in level_df.columns:
+                    level_df = level_df.drop(columns=['base_inspection_id'])
 
                 records = []
                 for _, row in level_df.iterrows():
                     record = row.to_dict()
-
-                    # Create a key to find the base inspection ID
-                    base_key = self._create_base_inspection_key(record)
-                    base_inspection_id = base_inspection_mapping.get(base_key)
-
-                    if base_inspection_id:
-                        record['base_inspection_id'] = base_inspection_id
-
-                    # Clean and sanitize the record
-                    cleaned_record = self._clean_inspection_record(record, level)
-                    sanitized_record = self.sanitize_record(cleaned_record)
+                    sanitized_record = self.sanitize_record(record)
                     records.append(sanitized_record)
 
-                # Bulk insert
                 if records:
-                    insert_stmt = table.insert().values(records)
-                    self.db.execute(insert_stmt)
+                    self.db.execute(table.insert(), records)
                     self.db.commit()
                     inserted_counts[level] = len(records)
-                    logger.info(f"Inserted {len(records)} records for inspection level {level}")
-                else:
-                    inserted_counts[level] = 0
-                    logger.warning(f"No records to insert for inspection level {level}")
+                    logger.info(f"Inserted {len(records)} records for level {level}")
 
             except Exception as e:
-                logger.error(f"Error inserting inspection level {level} data: {str(e)}")
+                logger.error(f"Error inserting level {level} data: {str(e)}")
                 self.db.rollback()
                 inserted_counts[level] = 0
 
         return inserted_counts
+
 
     def _create_base_inspection_key(self, record: Dict) -> str:
         """Create a key to match with base inspection records"""

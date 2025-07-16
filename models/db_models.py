@@ -12,7 +12,7 @@ engine = create_engine("postgresql://apps:PAI_Uat1_Apps@prstiai-client-dev-db-in
 
 
 class CategoryRecord(Base):
-    __tablename__ = "category_records"
+    __tablename__ = "categories"
     __table_args__ = {'schema': 'operations'}
 
     category_id = Column(Integer, primary_key=True, index=True, autoincrement=True)
@@ -27,7 +27,7 @@ class CategoryRecord(Base):
     locations = relationship("LocationRecord", back_populates="category")
     growers = relationship("GrowerRecord", back_populates="category")
     organizers = relationship("OrganizerRecord", back_populates="category")
-    inspections = relationship("SeasonCropInspectionBase", back_populates="category")
+    # inspections = relationship("SeasonCropInspectionBase", back_populates="category")
     column_metadata = relationship("ColumnMetadataRecord", back_populates="category")
 
 
@@ -41,7 +41,7 @@ class ColumnMetadataRecord(Base):
     type = Column(String(50), nullable=False)
     group_name = Column(String(100), nullable=True)
     is_visible = Column(Boolean, default=True, nullable=False)
-    category_id = Column(Integer, ForeignKey("operations.category_records.category_id"), nullable=False)
+    category_id = Column(Integer, ForeignKey("operations.categories.category_id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -50,12 +50,12 @@ class ColumnMetadataRecord(Base):
 
 
 class CropRecord(Base):
-    __tablename__ = "crop_records"
+    __tablename__ = "crops"
     __table_args__ = {'schema': 'operations'}
 
     crop_id: Mapped[str] = mapped_column(String(20), primary_key=True, unique=True, index=True)
     crop_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    category_id: Mapped[int] = mapped_column(Integer, ForeignKey("operations.category_records.category_id"), nullable=False)
+    category_id: Mapped[int] = mapped_column(Integer, ForeignKey("operations.categories.category_id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -66,13 +66,13 @@ class CropRecord(Base):
 
 
 class VarietyRecord(Base):
-    __tablename__ = "variety_records"
+    __tablename__ = "varieties"
     __table_args__ = {'schema': 'operations'}
 
     variety_id = Column(String(20), primary_key=True, unique=True, index=True, nullable=False)
     variety_name = Column(String(100), nullable=False)
-    crop_id = Column(String(20), ForeignKey("operations.crop_records.crop_id"), nullable=False)
-    category_id = Column(Integer, ForeignKey("operations.category_records.category_id"), nullable=False)
+    crop_id = Column(String(20), ForeignKey("operations.crops.crop_id"), nullable=False)
+    category_id = Column(Integer, ForeignKey("operations.categories.category_id"), nullable=False)
     male_parent_seed_lot_no = Column(String(50))
     female_parent_seed_lot_no = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -85,7 +85,7 @@ class VarietyRecord(Base):
 
 
 class LocationRecord(Base):
-    __tablename__ = "location_records"
+    __tablename__ = "locations"
     __table_args__ = {'schema': 'operations'}
 
     location_id = Column(String(20), unique=True, primary_key=True, index=True, nullable=False)
@@ -95,7 +95,7 @@ class LocationRecord(Base):
     district = Column(String(100))
     district_id = Column(Integer)
     state = Column(String(100))
-    category_id = Column(Integer, ForeignKey("operations.category_records.category_id"), nullable=False)
+    category_id = Column(Integer, ForeignKey("operations.categories.category_id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -105,14 +105,14 @@ class LocationRecord(Base):
 
 
 class GrowerRecord(Base):
-    __tablename__ = "grower_records"
+    __tablename__ = "growers"
     __table_args__ = {'schema': 'operations'}
 
     grower_id = Column(String(20), unique=True, primary_key=True, index=True, nullable=False)
     grower_name = Column(String(100), nullable=False)
     fathers_name = Column(String(100))
     grower_gender = Column(String(10))
-    category_id = Column(Integer, ForeignKey("operations.category_records.category_id"), nullable=False)
+    category_id = Column(Integer, ForeignKey("operations.categories.category_id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -122,12 +122,12 @@ class GrowerRecord(Base):
 
 
 class OrganizerRecord(Base):
-    __tablename__ = "organizer_records"
+    __tablename__ = "organizers"
     __table_args__ = {'schema': 'operations'}
 
     organizer_id = Column(String(20), unique=True, primary_key=True, index=True, nullable=False)
     organizer_name = Column(String(100), nullable=False)
-    category_id = Column(Integer, ForeignKey("operations.category_records.category_id"), nullable=False)
+    category_id = Column(Integer, ForeignKey("operations.categories.category_id"), nullable=False)
     production_plant = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -315,12 +315,12 @@ class SeasonCropInspectionBase(Base):
     id = Column(Integer, primary_key=True, index=True)
 
     season_id = Column(String(20), nullable=False)
-    crop_id = Column(String(20), ForeignKey("operations.crop_records.crop_id"), nullable=False)
-    variety_id = Column(String(20), ForeignKey("operations.variety_records.variety_id"), nullable=False)
-    location_id = Column(String(20), ForeignKey("operations.location_records.location_id"), nullable=False)
-    grower_id = Column(String(20), ForeignKey("operations.grower_records.grower_id"), nullable=False)
-    organizer_id = Column(String(20), ForeignKey("operations.organizer_records.organizer_id"))
-    category_id = Column(Integer, ForeignKey("operations.category_records.category_id"), nullable=False)
+    crop_id = Column(String(20), ForeignKey("operations.crops.crop_id"), nullable=False)
+    variety_id = Column(String(20), ForeignKey("operations.varieties.variety_id"), nullable=False)
+    location_id = Column(String(20), ForeignKey("operations.locations.location_id"), nullable=False)
+    grower_id = Column(String(20), ForeignKey("operations.growers.grower_id"), nullable=False)
+    organizer_id = Column(String(20), ForeignKey("operations.organizers.organizer_id"))
+    category_id = Column(Integer, ForeignKey("operations.categories.category_id"), nullable=False)
     lot_id = Column(String(50), nullable=True)
 
     hybrid_id = Column(String(50), nullable=True)
@@ -354,13 +354,12 @@ class SeasonCropInspectionBase(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    category = relationship("CategoryRecord", back_populates="inspections")
+    # category = relationship("CategoryRecord", back_populates="inspections")
     crop = relationship("CropRecord", back_populates="inspections")
     variety = relationship("VarietyRecord", back_populates="inspections")
     location = relationship("LocationRecord", back_populates="inspections")
     grower = relationship("GrowerRecord", back_populates="inspections")
     organizer = relationship("OrganizerRecord", back_populates="inspections")
-
 
 # Create tables
 # CategoryRecord.__table__.create(bind=engine, checkfirst=True)

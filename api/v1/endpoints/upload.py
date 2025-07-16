@@ -1,7 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 from core.db import SessionLocal
-from services import record_service, inspection_service
+from services import dynamic_category_records, inspection_service
 import pandas as pd
 
 router = APIRouter()
@@ -21,7 +21,7 @@ def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
     df = pd.read_excel(file.file, header=[0, 1])
     df.columns = [' '.join(col).strip() for col in df.columns.values]
 
-    record_service.load_and_insert_foundations(file.file, db)
+    dynamic_category_records.load_and_insert_foundations(file.file, db)
     inspection_service.insert_inspection_data(df, db)
 
     return {"message": "Upload successful", "rows": len(df)}
