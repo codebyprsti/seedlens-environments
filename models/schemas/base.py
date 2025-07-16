@@ -401,6 +401,16 @@ class SeasonCropInspectionResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+class YieldSummaryResponse(BaseModel):
+    crop_id: str
+    season_id: str
+    variety_id: Optional[str]
+    village: Optional[str]
+    total_received_qty: Optional[float]
+    total_packed_qty: Optional[float]
+    avg_productivity: Optional[float]
+
 # class DynamicYieldRecordSchema(BaseModel):
 #     grower_id: str
 #     crop_id: str

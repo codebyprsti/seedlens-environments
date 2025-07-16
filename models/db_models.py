@@ -403,6 +403,29 @@ class YieldRecord(Base):
 
     def __repr__(self):
         return f"<YieldRecord(grower_id={self.grower_id}, crop_id={self.crop_id}, lot_id={self.lot_id})>"
+
+class YieldInspectionView(Base):
+    __tablename__ = "yield_inspection_view"
+    __table_args__ = {'schema': 'operations'}
+
+    crop_id = Column(String, primary_key=True)
+    season_id = Column(String, primary_key=True)
+    variety_id = Column(String)
+    village = Column(String)
+    physical_received_qty = Column(Float)
+    packed_qty = Column(Float)
+    productivity = Column(Float)
+
+
+class SeasonRecord(Base):
+    __tablename__ = "seasons"
+    __table_args__ = {"schema": "operations"}
+
+    season_id = Column(String, primary_key=True)
+    season_name = Column(String)
+
+
+
 # Create tables
 # CategoryRecord.__table__.create(bind=engine, checkfirst=True)
 # ColumnMetadataRecord.__table__.create(bind=engine, checkfirst=True)
