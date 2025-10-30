@@ -1,6 +1,6 @@
 from pydantic import BaseModel, validator, Field, field_validator
 from sqlalchemy import Column, String, Float, Integer, DateTime, ForeignKey, Index
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional, List, Dict, Any
 
 
@@ -46,8 +46,6 @@ class VarietyRecordCreate(BaseSchema):
     variety_name: str = Field(..., max_length=100, description="Variety name from HSP Code")
     crop_id: str = Field(..., max_length=20, description="Associated crop ID")
     category_id: int = Field(..., description="Associated category ID")
-    male_parent_seed_lot_no: Optional[str] = Field(None, max_length=50)
-    female_parent_seed_lot_no: Optional[str] = Field(None, max_length=50)
 
 
 class VarietyRecordResponse(BaseSchema):
@@ -62,8 +60,9 @@ class VarietyRecordResponse(BaseSchema):
 
 
 # models/schemas/location_schemas.py
-class LocationRecordCreate(BaseSchema):
-    location_id: str = Field(..., max_length=20, description="Village ID")
+class LocationRecordCreate(BaseModel):
+    location_id: str = Field(..., max_length=20, description="Customed Village ID")
+    source_location_id: Optional[str] = Field(None, max_length=20, description="Village ID")
     village: str = Field(..., max_length=100, description="Village name")
     mandal: Optional[str] = Field(None, max_length=100, description="Mandal name")
     mandal_id: Optional[str] = Field(None, max_length=20, description="Mandal ID")
@@ -72,8 +71,31 @@ class LocationRecordCreate(BaseSchema):
     state: Optional[str] = Field(None, max_length=100, description="State name")
     category_id: int = Field(..., description="Associated category ID")
 
+class SupplyChainPlanningResponse(BaseModel):
+    id: Optional[int] = None
+    plan_revision_version: Optional[str] = None
+    season: Optional[str] = None
+    crop: Optional[str] = None
+    variety: Optional[str] = None
+    village: Optional[str] = None
+    grower: Optional[str] = None
+    net_acres_current: Optional[float] = None
+    productivity: Optional[float] = None
+    production_allocation: Optional[float] = None
+    availability_actual: Optional[float] = None
+    adjusted_production_allocation: Optional[float] = None
+    estimated_cost_per_kg: Optional[float] = None
+    estimated_production_cost: Optional[float] = None
+    category_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
 
 class LocationRecordResponse(BaseSchema):
+    source_location_id: str
     location_id: str
     village: str
     mandal_id: int
@@ -87,8 +109,9 @@ class LocationRecordResponse(BaseSchema):
 
 
 # models/schemas/grower_schemas.py
-class GrowerRecordCreate(BaseSchema):
+class GrowerRecordCreate(BaseModel):
     grower_id: str = Field(..., max_length=20, description="Unique grower identifier")
+    source_grower_id: Optional[str] = Field(None, max_length=20, description="Unique grower")
     grower_name: str = Field(..., max_length=100, description="Grower name")
     fathers_name: Optional[str] = Field(None, max_length=100)
     grower_gender: Optional[str] = Field(None, max_length=10)
@@ -98,11 +121,11 @@ class GrowerRecordCreate(BaseSchema):
 
 class GrowerRecordResponse(BaseSchema):
     grower_id: str
+    source_grower_id: str
     grower_name: str
     fathers_name: Optional[str]
     gender: Optional[str]
     category_id: int
-    # location_id: Optional[str]
     created_at: datetime
     updated_at: datetime
 
@@ -249,7 +272,8 @@ class SeasonCropInspectionBaseCreate(BaseSchema):
     grower_id: Optional[str] = None
     organizer_id: Optional[str] = None
     lot_id: Optional[str]
-
+    production_code: Optional[str] = None
+    production_location: Optional[str] = None
     hybrid_id: Optional[str]
     organizer_name: Optional[str]
     grower_name: Optional[str]
@@ -277,54 +301,55 @@ class SeasonCropInspectionBaseCreate(BaseSchema):
     tfa_name: Optional[str]
     production_plant: Optional[str]
 
-
-
 class YieldRecordBase(BaseModel):
-    grower_id: str = Field(..., description="Grower ID")
-    crop_id: str = Field(..., description="Crop ID")
-    lot_id: str = Field(..., description="Lot ID")
-    season_id: str = Field(..., description="Season ID")
-    variety_id: str = Field(..., description="Variety ID")
+    # Make all fields optional with proper defaults
+    grower_id: Optional[str] = ""
+    crop_id: Optional[str] = ""
+    lot_id: Optional[str] = ""
+    season_id: Optional[str] = ""
+    variety_id: Optional[str] = ""
 
     physical_received_qty_as_per_sap: Optional[float] = None
+    m1_soaking_date: Optional[date] = None
+    m1_soaking_slab: Optional[str] = None
+    female_soaking_date: Optional[date] = None
+    female_tp_date: Optional[date] = None
+
+    sowing_acres: Optional[float] = None
+    net_tp_acres: Optional[float] = None
+    net_acerage_area: Optional[float] = None
+    final_harvestable_area: Optional[float] = None
+
+    sum_of_received_raw_qty: Optional[float] = None
+    qty: Optional[float] = None
+    rate_per_kg: Optional[float] = None
+    amount_inr: Optional[float] = None
+
+    productivity_of_packed_seed: Optional[float] = None
     packed_qt: Optional[float] = None
-    productvit: Optional[float] = None
+    productvity: Optional[float] = None
+
     slab: Optional[str] = None
     pos_done_b: Optional[str] = None
     production_manager: Optional[str] = None
     production_plant: Optional[str] = None
     production_location: Optional[str] = None
     production_co: Optional[str] = None
+
     po_soaking_acres: Optional[float] = None
     purchase_order: Optional[str] = None
     planting_list_soaking_acres: Optional[float] = None
     net_acres: Optional[float] = None
+
     tp_days: Optional[int] = None
     tp_days_slab: Optional[str] = None
 
-    @validator('grower_id', 'crop_id', 'lot_id', 'season_id', 'variety_id')
-    def not_empty(cls, v):
-        if not v or v.strip() == '':
-            raise ValueError("Required field cannot be empty")
-        return v.strip()
+    class Config:
+        # Allow extra fields to be ignored
+        extra = "ignore"
+        # Convert string 'nan' to None
+        validate_assignment = True
 
-    @validator(
-        'physical_received_qty_as_per_sap', 'packed_qt', 'productvit',
-        'po_soaking_acres', 'planting_list_soaking_acres', 'net_acres'
-    )
-    def non_negative_float(cls, v):
-        if v is not None and v < 0:
-            raise ValueError("Values cannot be negative")
-        return v
-
-    @validator('tp_days')
-    def non_negative_int(cls, v):
-        if v is not None and v < 0:
-            raise ValueError("TP days cannot be negative")
-        return v
-
-class YieldRecordCreate(YieldRecordBase):
-    pass
 
 class YieldRecordUpdate(BaseModel):
     physical_received_qty_as_per_sap: Optional[float]
@@ -379,11 +404,9 @@ class SeasonCropInspectionBaseOut(BaseModel):
     female_qty: float
 
 class SeasonCropInspectionResponse(BaseModel):
-    crop_id: Optional[str]
-    season_id: Optional[str]
-    grower_id: Optional[str]
-    lot_id: Optional[str]
-    variety_id: Optional[str]
+    crop_name: Optional[str]
+    season_name: Optional[str]
+    variety_name: Optional[str]
     organizer_name: Optional[str]
     grower_name: Optional[str]
     grower_gender: Optional[str]
@@ -391,25 +414,42 @@ class SeasonCropInspectionResponse(BaseModel):
     village: Optional[str]
     mandal: Optional[str]
     district: Optional[str]
-    state: Optional[str]
-    male_soaking_acre: Optional[float]
-    male_no_of_pkt: Optional[float]
-    male_qty: Optional[float]
-    female_soaking_acre: Optional[float]
-    female_no_of_pkt: Optional[float]
-    female_qty: Optional[float]
+    stage_forecast1:Optional[float]
+    stage_forecast2:Optional[float]
 
     class Config:
         orm_mode = True
 
 class YieldSummaryResponse(BaseModel):
-    crop_id: str
-    season_id: str
-    variety_id: Optional[str]
-    village: Optional[str]
-    total_received_qty: Optional[float]
-    total_packed_qty: Optional[float]
+    season_name: Optional[str]
+    crop_name: Optional[str]
+    variety_name: Optional[str]
+    village: Optional[str] = None
+    grower_name: Optional[str] = None
+    total_received_qty: float
+    total_packed_qty: float
     avg_productivity: Optional[float]
+    forecast_1: Optional[float]
+    forecast_2: Optional[float]
+
+class SeedForecastBase(BaseModel):
+    grower_id: str
+    crop_id: str
+    lot_id: str
+    season_id: Optional[str]
+    variety_id: Optional[str]
+    stage_forecast1: Optional[float]
+    stage_forecast2: Optional[float]
+    stage_forecast3: Optional[float]
+    stage_forecast4: Optional[float]
+    stage_forecast5: Optional[float]
+    stage_forecast6: Optional[float]
+
+    class Config:
+        orm_mode = True
+
+
+
 
 # class DynamicYieldRecordSchema(BaseModel):
 #     grower_id: str

@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from core.db import get_db
-from models.db_models import SeasonCropInspectionBase
 from models.schemas.base import SeasonCropInspectionResponse
 
 router = APIRouter()
@@ -11,7 +10,8 @@ from models.db_models import (
     SeasonCropInspectionBase,
     CropRecord,
     SeasonRecord,
-    VarietyRecord
+    VarietyRecord,
+    SeedForecast
 )
 
 @router.get("/season-crop-inspection", response_model=List[SeasonCropInspectionResponse])
@@ -46,15 +46,16 @@ async def get_all_season_crop_inspection_data(
                 SeasonCropInspectionBase.male_qty_in_kgs.label("male_qty"),
                 SeasonCropInspectionBase.female_soaking_acre,
                 SeasonCropInspectionBase.female_no_of_pkt,
-                SeasonCropInspectionBase.female_qty_in_kgs.label("female_qty")
+                SeasonCropInspectionBase.female_qty_in_kgs.label("female_qty"),
+                SeedForecast.stage_forecast1,
+                SeedForecast.stage_forecast2
             )
             .join(CropRecord, CropRecord.crop_id == SeasonCropInspectionBase.crop_id)
             .join(SeasonRecord, SeasonRecord.season_id == SeasonCropInspectionBase.season_id)
             .join(VarietyRecord, VarietyRecord.variety_id == SeasonCropInspectionBase.variety_id)
-            .limit(100)
+            .outerjoin(SeedForecast, SeedForecast.lot_id == SeasonCropInspectionBase.lot_id)
             .all()
         )
-
         return [SeasonCropInspectionResponse(**row._asdict()) for row in results]
 
     except Exception as e:

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Body
-from api.v1.endpoints import upload, category, full_data, category_filter_router, views, add_record, inspection, yield_summary
+from api.v1.endpoints import upload, category, full_data, category_filter_router, views, add_record, inspection, yield_summary, operations_drop_down, supply_chain_planning, seed_forecast_comparison
 
 
 
@@ -13,6 +13,12 @@ api_router.include_router(category_filter_router.router, tags=["Category filters
 api_router.include_router(views.router, tags=["Views"])
 api_router.include_router(inspection.router, tags=["Inspection Data"])
 api_router.include_router(yield_summary.router, tags=["yield summary Data"])
+api_router.include_router(operations_drop_down.router, tags=["Drop-Down Options"])
+api_router.include_router(supply_chain_planning.router, tags=["Supply Chain Data"])
+api_router.include_router(seed_forecast_comparison.router, tags=["seed-forecast-comparison"])
+
+
+
 
 
 

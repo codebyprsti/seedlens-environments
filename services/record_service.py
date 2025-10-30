@@ -286,11 +286,11 @@ class RecordService:
 
             # Extract unique varieties
             variety_columns = self._find_columns(df, [
-                'hsp_code', "crop",
-                'male_parent_seed_lot_no', 'female_parent_seed_lot_no'
+                'hsp_code', "crop"
             ])
             if variety_columns:
                 varieties_df = df[variety_columns].drop_duplicates().dropna(subset=['hsp_code'])
+                varieties_df["category_id"] = 100003
                 records = varieties_df.to_dict('records')
                 normalized_varieties = [self.normalize_keys(r) for r in records]
                 # Replace crop_name with corresponding crop_id
@@ -869,9 +869,9 @@ try:
     # You can then extract and insert data like this:
     # service.bulk_insert_yield_records(unique_records['yield_data'])
     # unique_records = service.extract_unique_records(df)
-    service.bulk_insert_inspection_base(unique_records['inspection_base'])
+    # service.bulk_insert_inspection_base(unique_records['inspection_base'])
     # service.bulk_insert_crops(unique_records['crops'])
-    # service.bulk_insert_varieties(unique_records['varieties'])
+    service.bulk_insert_varieties(unique_records['varieties'])
     # service.bulk_insert_locations(unique_records['locations'])
     # service.bulk_insert_growers(unique_records['growers'])
     # service.bulk_insert_organizers(unique_records['organizers'])

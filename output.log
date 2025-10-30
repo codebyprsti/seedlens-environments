@@ -1,0 +1,946 @@
+nohup: ignoring input
+/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/pydantic/_internal/_config.py:373: UserWarning: Valid config keys have changed in V2:
+* 'orm_mode' has been renamed to 'from_attributes'
+  warnings.warn(message, UserWarning)
+INFO:     Started server process [378909]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     60.254.120.178:52045 - "GET /docs HTTP/1.1" 200 OK
+INFO:     60.254.120.178:52045 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     60.254.120.178:52045 - "GET /docs HTTP/1.1" 200 OK
+INFO:     60.254.120.178:52045 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     60.254.120.178:52044 - "GET /docs HTTP/1.1" 200 OK
+INFO:     60.254.120.178:52044 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     60.254.120.178:52044 - "GET /docs HTTP/1.1" 200 OK
+INFO:     60.254.120.178:52044 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     60.254.120.178:52044 - "GET /docs HTTP/1.1" 200 OK
+INFO:     60.254.120.178:52044 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42984 - "GET /docs HTTP/1.1" 200 OK
+INFO:     45.79.207.110:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     192.64.113.146:0 - "HEAD / HTTP/1.0" 404 Not Found
+INFO:     195.123.244.84:0 - "HEAD / HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /%40vite/env HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /actuator/env HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /server HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /version HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /.vscode/sftp.json HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /about HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /debug/default/view?panel=config HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /v2/_catalog HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /ecp/Current/exporttool/microsoft.exchange.ediscovery.exporttool.application HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /server-status HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /login.action HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /_all_dbs HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /.DS_Store HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /.env HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /.git/config HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /s/131313e2530323e2330323e23313/_/%3B/META-INF/maven/com.atlassian.jira/jira-webapp-dist/pom.properties HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /config.json HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /telescope/requests HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /info.php HTTP/1.0" 404 Not Found
+INFO:     206.189.19.19:0 - "GET /?rest_route=/wp/v2/users/ HTTP/1.0" 404 Not Found
+INFO:     195.201.235.93:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     195.201.235.93:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     168.151.116.199:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     162.43.224.92:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     60.254.120.178:0 - "GET /docs/ HTTP/1.0" 307 Temporary Redirect
+INFO:     60.254.120.178:0 - "GET /docs/ HTTP/1.0" 307 Temporary Redirect
+INFO:     60.254.120.178:0 - "GET /docs/ HTTP/1.0" 307 Temporary Redirect
+INFO:     60.254.120.178:0 - "GET /docs/ HTTP/1.0" 307 Temporary Redirect
+INFO:     60.254.120.178:0 - "GET /docs/ HTTP/1.0" 307 Temporary Redirect
+INFO:     60.254.120.178:0 - "GET /docs/ HTTP/1.0" 307 Temporary Redirect
+INFO:     60.254.120.178:0 - "GET /docs/ HTTP/1.0" 307 Temporary Redirect
+INFO:     60.254.120.178:0 - "GET /docs/ HTTP/1.0" 307 Temporary Redirect
+INFO:     60.254.120.178:0 - "GET /docs/ HTTP/1.0" 307 Temporary Redirect
+INFO:     60.254.120.178:0 - "GET /docs/ HTTP/1.0" 307 Temporary Redirect
+INFO:     60.254.120.178:0 - "GET /docs/ HTTP/1.0" 307 Temporary Redirect
+INFO:     60.254.120.178:0 - "GET /docs HTTP/1.0" 200 OK
+INFO:     60.254.120.178:0 - "GET /openapi.json HTTP/1.0" 200 OK
+INFO:     74.125.212.229:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     74.125.212.230:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     74.125.212.230:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     74.125.212.228:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     66.249.83.42:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     74.125.215.130:55875 - "GET / HTTP/1.1" 404 Not Found
+INFO:     74.125.215.130:38304 - "GET / HTTP/1.1" 404 Not Found
+INFO:     66.249.83.41:36467 - "GET / HTTP/1.1" 404 Not Found
+INFO:     66.249.83.41:0 - "GET / HTTP/1.0" 404 Not Found
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+INFO:     146.70.15.42:43883 - "GET / HTTP/1.1" 404 Not Found
+INFO:     146.70.15.42:0 - "GET / HTTP/1.0" 404 Not Found
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+INFO:     146.70.15.42:31733 - "GET / HTTP/1.1" 404 Not Found
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+INFO:     84.239.43.173:16136 - "GET / HTTP/1.1" 404 Not Found
+INFO:     84.239.43.173:0 - "GET / HTTP/1.0" 404 Not Found
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+INFO:     84.239.43.173:30443 - "GET / HTTP/1.1" 404 Not Found
+INFO:     164.90.228.79:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /%40vite/env HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /actuator/env HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /server HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /version HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /.vscode/sftp.json HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /about HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /debug/default/view?panel=config HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /v2/_catalog HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /ecp/Current/exporttool/microsoft.exchange.ediscovery.exporttool.application HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /server-status HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /login.action HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /_all_dbs HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /.DS_Store HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /.env HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /.git/config HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /s/131313e2530323e2330323e23313/_/%3B/META-INF/maven/com.atlassian.jira/jira-webapp-dist/pom.properties HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /config.json HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /telescope/requests HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /info.php HTTP/1.0" 404 Not Found
+INFO:     164.90.228.79:0 - "GET /?rest_route=/wp/v2/users/ HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.local HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.prod HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.dev HTTP/1.0" 404 Not Found
+INFO:     103.4.251.11:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     104.252.191.46:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     104.164.126.139:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /%40vite/env HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /actuator/env HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /server HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /version HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /.vscode/sftp.json HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /about HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /debug/default/view?panel=config HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /v2/_catalog HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /ecp/Current/exporttool/microsoft.exchange.ediscovery.exporttool.application HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /server-status HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /login.action HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /_all_dbs HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /.DS_Store HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /.env HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /.git/config HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /s/131313e2530323e2330323e23313/_/%3B/META-INF/maven/com.atlassian.jira/jira-webapp-dist/pom.properties HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /config.json HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /telescope/requests HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /info.php HTTP/1.0" 404 Not Found
+INFO:     206.81.24.227:0 - "GET /?rest_route=/wp/v2/users/ HTTP/1.0" 404 Not Found
+INFO:     103.4.250.133:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     103.196.9.248:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     34.133.132.219:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     66.228.53.204:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     47.33.68.110:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     64.15.129.125:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     192.175.111.252:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     64.15.129.111:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     64.15.129.108:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     192.175.111.234:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     78.159.108.27:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     78.159.108.27:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     104.164.126.127:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     107.172.195.221:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     103.196.9.106:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     54.212.204.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     34.141.215.20:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.local HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.prod HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.dev HTTP/1.0" 404 Not Found
+INFO:     79.127.182.171:0 - "GET /.git/config HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.local HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.prod HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.dev HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.local HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.prod HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.dev HTTP/1.0" 404 Not Found
+INFO:     123.191.132.255:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     135.148.100.196:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     1.85.216.106:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     183.236.7.198:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     162.216.150.249:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     23.27.145.132:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     45.79.181.104:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     183.134.59.131:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     183.134.59.131:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     183.134.59.131:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     183.134.59.131:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     172.235.40.131:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     206.168.34.192:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     206.168.34.192:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     206.168.34.192:0 - "GET /wiki HTTP/1.0" 404 Not Found
+INFO:     52.16.245.145:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     52.16.245.145:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     104.164.126.152:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     154.28.229.137:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     103.196.9.250:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     47.93.13.31:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     195.123.244.84:0 - "HEAD / HTTP/1.0" 404 Not Found
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+INFO:     167.172.164.240:40332 - "GET / HTTP/1.1" 404 Not Found
+INFO:     167.172.164.240:40338 - "GET /login HTTP/1.1" 404 Not Found
+INFO:     118.194.228.167:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     118.194.228.167:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     118.194.228.167:0 - "GET /robots.txt HTTP/1.0" 404 Not Found
+INFO:     118.194.228.167:0 - "GET /sitemap.xml HTTP/1.0" 404 Not Found
+INFO:     40.119.24.130:0 - "GET /owa/auth/logon.aspx HTTP/1.0" 404 Not Found
+INFO:     199.45.154.121:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     199.45.154.121:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     199.45.154.121:0 - "GET /sitemap.xml HTTP/1.0" 404 Not Found
+INFO:     185.242.226.157:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     185.218.84.46:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     91.84.87.137:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     91.84.87.137:0 - "GET /js/lkk_ch.js HTTP/1.0" 404 Not Found
+INFO:     91.84.87.137:0 - "GET /js/twint_ch.js HTTP/1.0" 404 Not Found
+WARNING:  Invalid HTTP request received.
+INFO:     3.149.59.26:49590 - "GET / HTTP/1.1" 404 Not Found
+INFO:     3.149.59.26:53558 - "GET / HTTP/1.1" 404 Not Found
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+INFO:     8.219.83.66:53338 - "GET / HTTP/1.1" 404 Not Found
+INFO:     8.219.83.66:53340 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     123.160.223.73:52100 - "GET / HTTP/1.1" 404 Not Found
+WARNING:  Invalid HTTP request received.
+INFO:     185.247.137.153:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     206.168.34.70:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     162.142.125.124:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     13.221.114.27:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     199.45.155.68:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     199.45.155.68:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     199.45.155.68:0 - "GET /sitemap.xml HTTP/1.0" 404 Not Found
+INFO:     133.242.174.119:0 - "GET /robots.txt HTTP/1.0" 404 Not Found
+INFO:     133.242.174.119:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.local HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.prod HTTP/1.0" 404 Not Found
+INFO:     104.244.74.39:0 - "HEAD /.env.dev HTTP/1.0" 404 Not Found
+INFO:     164.92.145.34:59562 - "GET / HTTP/1.1" 404 Not Found
+INFO:     164.92.145.34:59578 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     51.75.141.254:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     165.231.253.251:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     51.75.141.254:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     51.75.141.254:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     149.57.180.126:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     51.75.141.254:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     51.75.141.254:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     51.75.141.254:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     164.138.217.83:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     164.138.217.83:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     87.182.221.105:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.37.135.53:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.37.135.53:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     34.211.89.1:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     49.205.251.76:0 - "GET /api/v1/season-crop-inspection%27%20from%20origin%20%27http%3A//localhost%3A3000%27%20has%20been%20operation/%20%3A1%20blocked%20by%20CORS%20policy%3A%20No%20%27Access-Control-Allow-Origin HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET /api/v1/season-crop-inspection%27%20from%20origin%20%27http%3A//localhost%3A3000%27%20has%20been%20operation/%20%3A1%20blocked%20by%20CORS%20policy%3A%20No%20%27Access-Control-Allow-Origin HTTP/1.0" 404 Not Found
+INFO:     74.125.212.229:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     66.249.80.229:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     49.37.135.53:61737 - "GET /api/v1/season/full_data?category_id=100001 HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 93, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 144, in simple_response
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 78, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 75, in app
+    response = await f(request)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 302, in app
+    raw_response = await run_endpoint_function(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 215, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/concurrency.py", line 38, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/to_thread.py", line 56, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 2470, in run_sync_in_worker_thread
+    return await future
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 967, in run
+    result = context.run(func, *args)
+  File "/home/ec2-user/SeedIQ/api/v1/endpoints/full_data.py", line 47, in get_entity_full_data
+    cur.execute(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/psycopg2/extras.py", line 146, in execute
+    return super().execute(query, vars)
+psycopg2.errors.UndefinedColumn: column "name" does not exist
+LINE 1: SELECT name, start_date, end_date, description, is_default, ...
+               ^
+
+INFO:     49.37.135.53:61738 - "GET /api/v1/season/full_data?category_id=100001 HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 93, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 144, in simple_response
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 78, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 75, in app
+    response = await f(request)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 302, in app
+    raw_response = await run_endpoint_function(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 215, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/concurrency.py", line 38, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/to_thread.py", line 56, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 2470, in run_sync_in_worker_thread
+    return await future
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 967, in run
+    result = context.run(func, *args)
+  File "/home/ec2-user/SeedIQ/api/v1/endpoints/full_data.py", line 47, in get_entity_full_data
+    cur.execute(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/psycopg2/extras.py", line 146, in execute
+    return super().execute(query, vars)
+psycopg2.errors.UndefinedColumn: column "name" does not exist
+LINE 1: SELECT name, start_date, end_date, description, is_default, ...
+               ^
+
+INFO:     49.37.135.53:61739 - "GET /api/v1/season/full_data?category_id=100001 HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 93, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 144, in simple_response
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 78, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 75, in app
+    response = await f(request)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 302, in app
+    raw_response = await run_endpoint_function(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 215, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/concurrency.py", line 38, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/to_thread.py", line 56, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 2470, in run_sync_in_worker_thread
+    return await future
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 967, in run
+    result = context.run(func, *args)
+  File "/home/ec2-user/SeedIQ/api/v1/endpoints/full_data.py", line 47, in get_entity_full_data
+    cur.execute(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/psycopg2/extras.py", line 146, in execute
+    return super().execute(query, vars)
+psycopg2.errors.UndefinedColumn: column "name" does not exist
+LINE 1: SELECT name, start_date, end_date, description, is_default, ...
+               ^
+
+INFO:     49.37.135.53:61754 - "GET /api/v1/views/?user_id=ankita.gutte@prsti.tech HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 78, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 75, in app
+    response = await f(request)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 302, in app
+    raw_response = await run_endpoint_function(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 215, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/concurrency.py", line 38, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/to_thread.py", line 56, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 2470, in run_sync_in_worker_thread
+    return await future
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 967, in run
+    result = context.run(func, *args)
+  File "/home/ec2-user/SeedIQ/api/v1/endpoints/views.py", line 19, in get_user_views
+    return view_service.get_user_views(user_id)
+  File "/home/ec2-user/SeedIQ/services/view_service.py", line 42, in get_user_views
+    cur.execute("""
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/psycopg2/extras.py", line 146, in execute
+    return super().execute(query, vars)
+psycopg2.errors.UndefinedTable: relation "operations.user_views" does not exist
+LINE 3:               FROM operations.user_views
+                           ^
+
+INFO:     49.37.135.53:61759 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:0 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1504&village=DAKHINIBANDHA HTTP/1.0" 200 OK
+INFO:     49.37.135.53:61786 - "GET /api/v1/season/full_data?category_id=100001 HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 93, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 144, in simple_response
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 78, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 75, in app
+    response = await f(request)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 302, in app
+    raw_response = await run_endpoint_function(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 215, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/concurrency.py", line 38, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/to_thread.py", line 56, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 2470, in run_sync_in_worker_thread
+    return await future
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 967, in run
+    result = context.run(func, *args)
+  File "/home/ec2-user/SeedIQ/api/v1/endpoints/full_data.py", line 47, in get_entity_full_data
+    cur.execute(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/psycopg2/extras.py", line 146, in execute
+    return super().execute(query, vars)
+psycopg2.errors.UndefinedColumn: column "name" does not exist
+LINE 1: SELECT name, start_date, end_date, description, is_default, ...
+               ^
+
+INFO:     49.37.135.53:61787 - "GET /api/v1/season/full_data?category_id=100001 HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 93, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 144, in simple_response
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 78, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 75, in app
+    response = await f(request)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 302, in app
+    raw_response = await run_endpoint_function(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 215, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/concurrency.py", line 38, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/to_thread.py", line 56, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 2470, in run_sync_in_worker_thread
+    return await future
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 967, in run
+    result = context.run(func, *args)
+  File "/home/ec2-user/SeedIQ/api/v1/endpoints/full_data.py", line 47, in get_entity_full_data
+    cur.execute(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/psycopg2/extras.py", line 146, in execute
+    return super().execute(query, vars)
+psycopg2.errors.UndefinedColumn: column "name" does not exist
+LINE 1: SELECT name, start_date, end_date, description, is_default, ...
+               ^
+
+INFO:     49.37.135.53:61788 - "GET /api/v1/season/full_data?category_id=100001 HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 93, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 144, in simple_response
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 78, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 75, in app
+    response = await f(request)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 302, in app
+    raw_response = await run_endpoint_function(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 215, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/concurrency.py", line 38, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/to_thread.py", line 56, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 2470, in run_sync_in_worker_thread
+    return await future
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/anyio/_backends/_asyncio.py", line 967, in run
+    result = context.run(func, *args)
+  File "/home/ec2-user/SeedIQ/api/v1/endpoints/full_data.py", line 47, in get_entity_full_data
+    cur.execute(
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/psycopg2/extras.py", line 146, in execute
+    return super().execute(query, vars)
+psycopg2.errors.UndefinedColumn: column "name" does not exist
+LINE 1: SELECT name, start_date, end_date, description, is_default, ...
+               ^
+
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     49.37.135.53:61910 - "GET /api/v1/grower/full_data?category_id=100005 HTTP/1.1" 200 OK
+INFO:     47.93.13.31:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     49.37.135.53:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     49.37.135.53:0 - "OPTIONS /api/v1/season-crop-inspection HTTP/1.0" 400 Bad Request
+INFO:     49.37.135.53:62351 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:62354 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:62368 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.205.251.76:0 - "GET /docs HTTP/1.0" 200 OK
+INFO:     49.205.251.76:0 - "GET /openapi.json HTTP/1.0" 200 OK
+INFO:     49.205.251.76:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     138.197.157.130:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     138.197.157.130:0 - "GET /robots.txt HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET /docs HTTP/1.0" 200 OK
+INFO:     49.205.251.76:0 - "GET /openapi.json HTTP/1.0" 200 OK
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /lo HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /login HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /login HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /login/ HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /login HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /login HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /login HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /login HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /login HTTP/1.0" 404 Not Found
+INFO:     206.168.34.88:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     205.169.39.173:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     34.122.147.229:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.205.251.76:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.205.251.76:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET /docs HTTP/1.0" 200 OK
+INFO:     49.205.251.76:0 - "GET /openapi.json HTTP/1.0" 200 OK
+INFO:     66.249.83.41:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.205.251.76:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     91.84.87.137:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     91.84.87.137:0 - "GET /js/lkk_ch.js HTTP/1.0" 404 Not Found
+INFO:     91.84.87.137:0 - "GET /js/twint_ch.js HTTP/1.0" 404 Not Found
+INFO:     116.204.229.238:0 - "GET /actuator/env HTTP/1.0" 404 Not Found
+INFO:     169.150.201.20:0 - "GET /.git/config HTTP/1.0" 404 Not Found
+INFO:     69.67.183.108:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.37.135.53:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.37.135.53:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     199.45.154.148:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     199.45.154.148:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     199.45.154.148:0 - "GET /.well-known/security.txt HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     198.235.24.20:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     35.88.35.179:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     87.236.176.219:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     49.37.135.53:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.37.135.53:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     159.223.82.185:0 - "GET / HTTP/1.0" 404 Not Found
+INFO:     159.223.82.185:0 - "GET /form.html HTTP/1.0" 404 Not Found
+INFO:     159.223.82.185:0 - "GET /upl.php HTTP/1.0" 404 Not Found
+INFO:     159.223.82.185:0 - "GET /t4 HTTP/1.0" 404 Not Found
+INFO:     159.223.82.185:0 - "GET /geoip/ HTTP/1.0" 404 Not Found
+INFO:     159.223.82.185:0 - "GET /favicon.ico HTTP/1.0" 404 Not Found
+INFO:     159.223.82.185:0 - "GET /1.php HTTP/1.0" 404 Not Found
+INFO:     159.223.82.185:0 - "GET /systembc/password.php HTTP/1.0" 404 Not Found
+INFO:     159.223.82.185:0 - "GET /password.php HTTP/1.0" 404 Not Found
+INFO:     49.205.251.76:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.205.251.76:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.205.251.76:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.205.251.76:0 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:42238 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:59838 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:50008 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1504&village=DAKHINIBANDHA HTTP/1.0" 200 OK
+INFO:     127.0.0.1:33868 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:39246 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1504&village=DAKHINIBANDHA HTTP/1.0" 200 OK
+INFO:     127.0.0.1:39492 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:51858 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1504&village=DAKHINIBANDHA HTTP/1.0" 200 OK
+INFO:     127.0.0.1:33338 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:47846 - "GET / HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:47862 - "GET //wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:47878 - "GET //xmlrpc.php?rsd HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:47894 - "GET / HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:47906 - "GET //blog/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:47916 - "GET //web/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:47918 - "GET //wordpress/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:47934 - "GET //website/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:47936 - "GET //wp/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:34660 - "GET //news/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:34666 - "GET //2018/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:34678 - "GET //2019/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:34680 - "GET //shop/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:34688 - "GET //wp1/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:34694 - "GET //test/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:34698 - "GET //media/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:34706 - "GET //wp2/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:34712 - "GET //site/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:34714 - "GET //cms/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:34720 - "GET //sito/wp-includes/wlwmanifest.xml HTTP/1.0" 404 Not Found
+INFO:     127.0.0.1:34732 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:56808 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1451&village=SANAKUANL HTTP/1.0" 200 OK
+INFO:     127.0.0.1:56824 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1504&village=ODASHAL HTTP/1.0" 200 OK
+INFO:     127.0.0.1:57678 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1451&village=SANAKUANL HTTP/1.0" 200 OK
+INFO:     127.0.0.1:53172 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1437&village=ADRALIYA HTTP/1.0" 200 OK
+INFO:     127.0.0.1:43398 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1371&village=PURSHOTTAMPUR HTTP/1.0" 200 OK
+INFO:     127.0.0.1:58874 - "GET /docs HTTP/1.0" 200 OK
+INFO:     127.0.0.1:58884 - "GET /openapi.json HTTP/1.0" 200 OK
+INFO:     127.0.0.1:55484 - "GET /api/v1/yield-summary HTTP/1.0" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 78, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 75, in app
+    response = await f(request)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 339, in app
+    response = actual_response_class(content, **response_args)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/responses.py", line 190, in __init__
+    super().__init__(content, status_code, headers, media_type, background)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/responses.py", line 47, in __init__
+    self.body = self.render(content)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/responses.py", line 193, in render
+    return json.dumps(
+  File "/usr/lib64/python3.9/json/__init__.py", line 234, in dumps
+    return cls(
+  File "/usr/lib64/python3.9/json/encoder.py", line 199, in encode
+    chunks = self.iterencode(o, _one_shot=True)
+  File "/usr/lib64/python3.9/json/encoder.py", line 257, in iterencode
+    return _iterencode(o, 0)
+ValueError: Out of range float values are not JSON compliant
+INFO:     127.0.0.1:35612 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1504&village=DAKHINIBANDHA HTTP/1.0" 200 OK
+INFO:     127.0.0.1:35626 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1504&village=KASHIMPUR HTTP/1.0" 200 OK
+INFO:     127.0.0.1:35642 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1504&village=SANAKUANL HTTP/1.0" 200 OK
+INFO:     127.0.0.1:45816 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1504&village=SANAORALI HTTP/1.0" 200 OK
+INFO:     127.0.0.1:45826 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1504&village=BODAK HTTP/1.0" 200 OK
+INFO:     127.0.0.1:47066 - "GET /api/v1/yield-summary HTTP/1.0" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 78, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/routing.py", line 75, in app
+    response = await f(request)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/fastapi/routing.py", line 339, in app
+    response = actual_response_class(content, **response_args)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/responses.py", line 190, in __init__
+    super().__init__(content, status_code, headers, media_type, background)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/responses.py", line 47, in __init__
+    self.body = self.render(content)
+  File "/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/starlette/responses.py", line 193, in render
+    return json.dumps(
+  File "/usr/lib64/python3.9/json/__init__.py", line 234, in dumps
+    return cls(
+  File "/usr/lib64/python3.9/json/encoder.py", line 199, in encode
+    chunks = self.iterencode(o, _one_shot=True)
+  File "/usr/lib64/python3.9/json/encoder.py", line 257, in iterencode
+    return _iterencode(o, 0)
+ValueError: Out of range float values are not JSON compliant
+INFO:     127.0.0.1:49536 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:50662 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     18.97.5.42:52782 - "GET / HTTP/1.1" 404 Not Found
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [378909]

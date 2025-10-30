@@ -1,0 +1,45 @@
+nohup: ignoring input
+/home/ec2-user/SeedIQ/.venv/lib64/python3.9/site-packages/pydantic/_internal/_config.py:373: UserWarning: Valid config keys have changed in V2:
+* 'orm_mode' has been renamed to 'from_attributes'
+  warnings.warn(message, UserWarning)
+INFO:     Started server process [402943]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:41038 - "GET /docs HTTP/1.0" 200 OK
+INFO:     127.0.0.1:41042 - "GET /openapi.json HTTP/1.0" 200 OK
+INFO:     127.0.0.1:40552 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:56074 - "GET /docs HTTP/1.0" 200 OK
+INFO:     127.0.0.1:56090 - "GET /openapi.json HTTP/1.0" 200 OK
+INFO:     127.0.0.1:44256 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:44216 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:47484 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:41554 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:38950 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:58832 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:35842 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.205.251.76:27948 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     66.249.83.41:53508 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50546 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50546 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57316 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     127.0.0.1:59018 - "GET /api/v1/season-crop-inspection HTTP/1.0" 200 OK
+INFO:     49.37.135.53:50639 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1504&village=DAKHINIBANDHA HTTP/1.0" 200 OK
+INFO:     49.37.135.53:50658 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50658 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50660 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50660 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50676 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50682 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50691 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50703 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1504&village=SAHASPUR HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50716 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50728 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50728 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50728 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50740 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50740 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50740 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50740 - "GET /api/v1/season-crop-inspection HTTP/1.1" 200 OK
+INFO:     49.37.135.53:50762 - "GET /api/v1/yield-summary?crop_id=CR_001&season_id=RABI_24_25&variety_id=VR_1504&village=SAHASPUR HTTP/1.1" 200 OK
