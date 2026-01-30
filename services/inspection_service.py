@@ -59,10 +59,14 @@ class DynamicInspectionLevelModel:
             return self.created_tables[table_name]
 
         # Base columns that every inspection level should have
+        # CRITICAL: lot_no, season, and crop must be included as base columns
         base_columns = [
             Column('id', String, primary_key=True),
             Column('inspection_level', Integer, default=level),
             Column('inspection_date', DateTime),
+            Column('lot_no', String),  # Required for comparisons - must be normalized
+            Column('season', String),  # Required - populated from Excel
+            Column('crop', String),  # Required - populated from Excel
             Column('created_at', DateTime, default=datetime.utcnow),
             Column('updated_at', DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
         ]
@@ -71,19 +75,26 @@ class DynamicInspectionLevelModel:
         dynamic_columns = []
         for col_name, data_type in columns_config.items():
             if col_name not in ['id', 'base_inspection_id', 'inspection_level', 'inspection_date', 'inspector_name']:
+                # Sanitize column name for SQL compatibility and normalize to lowercase
+                import re
+                sanitized_col_name = str(col_name).replace('/', '_').replace(' ', '_').replace('-', '_')
+                sanitized_col_name = sanitized_col_name.replace('(', '').replace(')', '').replace('.', '_')
+                sanitized_col_name = re.sub(r'_+', '_', sanitized_col_name).strip('_')
+                sanitized_col_name = sanitized_col_name.lower()  # Normalize to lowercase for consistency
+                
                 if data_type.lower() in ['string', 'str', 'text']:
-                    dynamic_columns.append(Column(col_name, String))
+                    dynamic_columns.append(Column(sanitized_col_name, String))
                 elif data_type.lower() in ['integer', 'int']:
-                    dynamic_columns.append(Column(col_name, Integer))
+                    dynamic_columns.append(Column(sanitized_col_name, Integer))
                 elif data_type.lower() in ['float', 'decimal', 'number']:
-                    dynamic_columns.append(Column(col_name, Float))
+                    dynamic_columns.append(Column(sanitized_col_name, Float))
                 elif data_type.lower() in ['datetime', 'date']:
-                    dynamic_columns.append(Column(col_name, DateTime))
+                    dynamic_columns.append(Column(sanitized_col_name, DateTime))
                 elif data_type.lower() in ['text', 'longtext']:
-                    dynamic_columns.append(Column(col_name, Text))
+                    dynamic_columns.append(Column(sanitized_col_name, Text))
                 else:
                     # Default to String for unknown types
-                    dynamic_columns.append(Column(col_name, String))
+                    dynamic_columns.append(Column(sanitized_col_name, String))
 
         # Create the table
         table = Table(
@@ -170,7 +181,7 @@ class InspectionLevelProcessor:
                 })
 
         # Add static columns like season, crop_name etc. to each inspection level
-        identifier_columns = ['season_id', 'crop_id', 'variety_id', 'grower_id', 'lot_id']
+        identifier_columns = ['season_id', 'crop_id', 'variety_id', 'grower_id', 'lot_no']  # Changed lot_id to lot_no
         for level in inspection_columns:
             for col in identifier_columns:
                 if col in df.columns:
@@ -330,6 +341,7 @@ class InspectionLevelProcessor:
     def bulk_insert_inspection_level_data(self, level_dataframes: Dict[int, pd.DataFrame]) -> Dict[int, int]:
         """
         Simplified version without base_inspection mapping
+        Inserts all rows without filtering or deduplication
         """
         inserted_counts = {}
 
@@ -338,29 +350,110 @@ class InspectionLevelProcessor:
                 table_name = f"inspection_level_{level}"
                 table = self.dynamic_model_factory.created_tables.get(table_name)
 
-                if not isinstance(table, Table):
+                if table is None or not isinstance(table, Table):
                     logger.warning(f"Table not found for level {level}")
                     inserted_counts[level] = 0
                     continue
 
+                # Get valid table columns
+                valid_columns = set(table.columns.keys())
+                logger.info(f"Table {table_name} has {len(valid_columns)} columns")
+                
                 # Remove any reference to base_inspection_id in the DataFrame
                 if 'base_inspection_id' in level_df.columns:
                     level_df = level_df.drop(columns=['base_inspection_id'])
 
+                # Prepare records - filter to only include valid table columns
                 records = []
-                for _, row in level_df.iterrows():
+                skipped_cols = set()
+                for idx, row in level_df.iterrows():
                     record = row.to_dict()
+                    # Sanitize the record first
                     sanitized_record = self.sanitize_record(record)
-                    records.append(sanitized_record)
+                    # Filter to only include columns that exist in the table
+                    filtered_record = {}
+                    for key, value in sanitized_record.items():
+                        if key in valid_columns:
+                            filtered_record[key] = value
+                        else:
+                            if idx == 0:  # Only log once for first record
+                                skipped_cols.add(key)
+                    
+                    # Ensure all required columns are present (set to None if missing)
+                    for col in valid_columns:
+                        if col not in filtered_record:
+                            filtered_record[col] = None
+                    
+                    records.append(filtered_record)
+                
+                if skipped_cols and len(records) > 0:
+                    logger.info(f"Skipped {len(skipped_cols)} columns not in table: {list(skipped_cols)[:10]}")
 
                 if records:
-                    self.db.execute(table.insert(), records)
-                    self.db.commit()
-                    inserted_counts[level] = len(records)
-                    logger.info(f"Inserted {len(records)} records for level {level}")
+                    logger.info(f"Prepared {len(records)} records for insertion into {table_name}")
+                    if len(records) > 0:
+                        logger.info(f"Sample record keys (first record): {list(records[0].keys())[:10]}")
+                        logger.info(f"Table columns count: {len(valid_columns)}")
+                    
+                    # Use engine connection directly to avoid session/boolean evaluation issues
+                    engine = getattr(self, 'engine', None)
+                    if engine is None:
+                        # Try to get from db bind
+                        engine = self.db.bind if hasattr(self.db, 'bind') else None
+                    
+                    if engine is None:
+                        # Fallback: use session execute - insert records one by one to avoid boolean evaluation
+                        logger.warning("No engine available, using session execute row-by-row")
+                        total_inserted = 0
+                        for idx, record in enumerate(records):
+                            try:
+                                ins = table.insert()
+                                self.db.execute(ins, [record])
+                                if (idx + 1) % 1000 == 0:
+                                    self.db.commit()
+                                    logger.info(f"Committed {idx + 1} records...")
+                                    total_inserted = idx + 1
+                            except Exception as row_error:
+                                import traceback
+                                logger.error(f"Error inserting row {idx}: {row_error}")
+                                logger.error(f"Row traceback: {traceback.format_exc()}")
+                                self.db.rollback()
+                                raise
+                        # Final commit
+                        self.db.commit()
+                        inserted_counts[level] = len(records)
+                        logger.info(f"Inserted all {len(records)} records row-by-row")
+                    else:
+                        # Use engine connection directly - this avoids boolean evaluation issues
+                        with engine.begin() as conn:
+                            batch_size = 1000
+                            total_inserted = 0
+                            for i in range(0, len(records), batch_size):
+                                batch = records[i:i + batch_size]
+                                try:
+                                    ins = table.insert()
+                                    conn.execute(ins, batch)
+                                    total_inserted += len(batch)
+                                    if (i // batch_size + 1) % 10 == 0 or i + batch_size >= len(records):
+                                        logger.info(f"Inserted batch {i//batch_size + 1}: {len(batch)} records (total: {total_inserted}/{len(records)})")
+                                except Exception as batch_error:
+                                    import traceback
+                                    logger.error(f"Error inserting batch {i//batch_size + 1}: {batch_error}")
+                                    logger.error(f"Batch traceback: {traceback.format_exc()}")
+                                    raise
+                            inserted_counts[level] = total_inserted
+                            # Commit session as well for consistency
+                            try:
+                                self.db.commit()
+                            except:
+                                pass
+                    
+                    logger.info(f"Successfully inserted {inserted_counts[level]} records for level {level}")
 
             except Exception as e:
                 logger.error(f"Error inserting level {level} data: {str(e)}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
                 self.db.rollback()
                 inserted_counts[level] = 0
 
@@ -380,12 +473,27 @@ class InspectionLevelProcessor:
             return {}
 
         valid_columns = table.columns.keys()
+        
+        # CRITICAL: Never drop season and crop columns, even if NULL
+        # These are required columns and must be present in every record
+        protected_columns = {'season', 'crop', 'lot_no'}
 
-        # Keep only the keys that match table columns and drop nulls
-        cleaned = {
-            key: value
-            for key, value in record.items()
-            if key in valid_columns and pd.notnull(value)
-        }
+        # Keep only the keys that match table columns
+        # For protected columns (season, crop, lot_no), include even if NULL
+        # For other columns, drop nulls
+        cleaned = {}
+        for key, value in record.items():
+            if key in valid_columns:
+                key_lower = key.lower()
+                # Always include protected columns, even if NULL
+                if key_lower in protected_columns:
+                    cleaned[key] = value  # Include even if NULL
+                elif pd.notnull(value):
+                    cleaned[key] = value  # Only include non-null for other columns
+        
+        # CRITICAL: Ensure season and crop are always present (set to None if missing)
+        for protected_col in protected_columns:
+            if protected_col not in cleaned:
+                cleaned[protected_col] = None
 
         return cleaned

@@ -43,7 +43,7 @@ def safe_float_convert(value):
         return 0.0
 
 
-def check_table_exists(conn, table_name: str, schema: str = "operations") -> bool:
+def check_table_exists(conn, table_name: str, schema: str = "operations_demo") -> bool:
     """Check if a table exists in the specified schema"""
     try:
         cur = conn.cursor()
@@ -60,7 +60,7 @@ def check_table_exists(conn, table_name: str, schema: str = "operations") -> boo
         return False
 
 
-def get_table_columns(conn, table_name: str, schema: str = "operations") -> List[str]:
+def get_table_columns(conn, table_name: str, schema: str = "operations_demo") -> List[str]:
     """Get column names for a table"""
     try:
         cur = conn.cursor()
@@ -140,7 +140,7 @@ def get_filter_options(
         try:
             # Try from supply chain planning first
             cur.execute("""
-                SELECT DISTINCT season FROM operations.supply_chain_planning 
+                SELECT DISTINCT season FROM operations_demo.supply_chain_planning 
                 WHERE season IS NOT NULL AND season != ''
                 ORDER BY season
             """)
@@ -150,8 +150,8 @@ def get_filter_options(
             if has_seed_forecast_table and has_seasons_table:
                 cur.execute("""
                     SELECT DISTINCT s.season_name as season 
-                    FROM operations.seed_forecast sf
-                    JOIN operations.seasons s ON sf.season_id = s.season_id
+                    FROM operations_demo.seed_forecast sf
+                    JOIN operations_demo.seasons s ON sf.season_id = s.season_id
                     WHERE s.season_name IS NOT NULL AND s.season_name != ''
                 """)
                 seasons.extend([row['season'] for row in cur.fetchall()])
@@ -162,7 +162,7 @@ def get_filter_options(
         crops = []
         try:
             cur.execute("""
-                SELECT DISTINCT crop FROM operations.supply_chain_planning 
+                SELECT DISTINCT crop FROM operations_demo.supply_chain_planning 
                 WHERE crop IS NOT NULL AND crop != ''
                 ORDER BY crop
             """)
@@ -171,8 +171,8 @@ def get_filter_options(
             if has_seed_forecast_table and has_crops_table:
                 cur.execute("""
                     SELECT DISTINCT c.crop_name as crop 
-                    FROM operations.seed_forecast sf
-                    JOIN operations.crops c ON sf.crop_id = c.crop_id
+                    FROM operations_demo.seed_forecast sf
+                    JOIN operations_demo.crops c ON sf.crop_id = c.crop_id
                     WHERE c.crop_name IS NOT NULL AND c.crop_name != ''
                 """)
                 crops.extend([row['crop'] for row in cur.fetchall()])
@@ -183,7 +183,7 @@ def get_filter_options(
         varieties = []
         try:
             cur.execute("""
-                SELECT DISTINCT variety FROM operations.supply_chain_planning 
+                SELECT DISTINCT variety FROM operations_demo.supply_chain_planning 
                 WHERE variety IS NOT NULL AND variety != ''
                 ORDER BY variety
             """)
@@ -192,8 +192,8 @@ def get_filter_options(
             if has_seed_forecast_table and has_varieties_table:
                 cur.execute("""
                     SELECT DISTINCT v.variety_name as variety 
-                    FROM operations.seed_forecast sf
-                    JOIN operations.varieties v ON sf.variety_id = v.variety_id
+                    FROM operations_demo.seed_forecast sf
+                    JOIN operations_demo.varieties v ON sf.variety_id = v.variety_id
                     WHERE v.variety_name IS NOT NULL AND v.variety_name != ''
                 """)
                 varieties.extend([row['variety'] for row in cur.fetchall()])
@@ -205,7 +205,7 @@ def get_filter_options(
         try:
             cur.execute("""
                 SELECT DISTINCT plan_revision_version 
-                FROM operations.supply_chain_planning 
+                FROM operations_demo.supply_chain_planning 
                 WHERE plan_revision_version IS NOT NULL AND plan_revision_version != ''
                 ORDER BY plan_revision_version DESC
             """)
@@ -273,8 +273,8 @@ def get_filtered_options(
             if has_seasons_table:
                 cur.execute("""
                     SELECT DISTINCT s.season_id, s.season_name
-                    FROM operations.seasons s
-                    JOIN operations.supply_chain_planning scp ON s.season_name = scp.season
+                    FROM operations_demo.seasons s
+                    JOIN operations_demo.supply_chain_planning scp ON s.season_name = scp.season
                     WHERE s.season_name IS NOT NULL AND s.season_name != ''
                     ORDER BY s.season_name
                 """)
@@ -282,7 +282,7 @@ def get_filtered_options(
             else:
                 cur.execute("""
                     SELECT DISTINCT season 
-                    FROM operations.supply_chain_planning 
+                    FROM operations_demo.supply_chain_planning 
                     WHERE season IS NOT NULL AND season != ''
                     ORDER BY season
                 """)
@@ -295,8 +295,8 @@ def get_filtered_options(
             if has_crops_table:
                 cur.execute("""
                     SELECT DISTINCT c.crop_id, c.crop_name
-                    FROM operations.crops c
-                    JOIN operations.supply_chain_planning scp ON c.crop_name = scp.crop
+                    FROM operations_demo.crops c
+                    JOIN operations_demo.supply_chain_planning scp ON c.crop_name = scp.crop
                     WHERE scp.season ILIKE %s 
                     AND c.crop_name IS NOT NULL AND c.crop_name != ''
                     ORDER BY c.crop_name
@@ -305,7 +305,7 @@ def get_filtered_options(
             else:
                 cur.execute("""
                     SELECT DISTINCT crop 
-                    FROM operations.supply_chain_planning 
+                    FROM operations_demo.supply_chain_planning 
                     WHERE season ILIKE %s 
                     AND crop IS NOT NULL AND crop != ''
                     ORDER BY crop
@@ -316,14 +316,42 @@ def get_filtered_options(
 
         elif season_id and crop_id and not plan_versions:
             # Step 3: Return plan versions for season + crop
+            # First, resolve season_name from operations_demo.seasons using season_id
+            cur.execute("""
+                SELECT season_name 
+                FROM operations_demo.seasons 
+                WHERE season_id = %s
+            """, (season_id,))
+            season_row = cur.fetchone()
+            if not season_row:
+                result["plan_versions"] = []
+                return result
+            season_name = season_row['season_name']
+            
+            # Second, resolve crop_name from operations_demo.crops using crop_id
+            cur.execute("""
+                SELECT crop_name 
+                FROM operations_demo.crops 
+                WHERE crop_id = %s
+            """, (crop_id,))
+            crop_row = cur.fetchone()
+            if not crop_row:
+                result["plan_versions"] = []
+                return result
+            crop_name = crop_row['crop_name']
+            
+            # Third, fetch DISTINCT plan_revision_version from operations_demo.supply_chain_planning
+            # using exact match with UPPER(TRIM()) for case-insensitive and whitespace-tolerant matching
             cur.execute("""
                 SELECT DISTINCT plan_revision_version 
-                FROM operations.supply_chain_planning 
-                WHERE season ILIKE %s AND crop ILIKE %s
-                AND plan_revision_version IS NOT NULL AND plan_revision_version != ''
+                FROM operations_demo.supply_chain_planning 
+                WHERE UPPER(TRIM(season)) = UPPER(TRIM(%s))
+                  AND UPPER(TRIM(crop)) = UPPER(TRIM(%s))
+                  AND plan_revision_version IS NOT NULL 
+                  AND plan_revision_version != ''
                 ORDER BY plan_revision_version DESC
-            """, (f"%{season_id}%", f"%{crop_id}%"))
-            plan_versions = [{row['plan_revision_version']:row['plan_revision_version']} for row in cur.fetchall()]
+            """, (season_name, crop_name))
+            plan_versions = [{row['plan_revision_version']: row['plan_revision_version']} for row in cur.fetchall()]
             result["plan_versions"] = plan_versions
 
         elif season_id and crop_id and plan_versions:
@@ -348,19 +376,24 @@ def get_filtered_options(
 
 @router.get("/seed-forecast/comparison")
 def get_seed_forecast_comparison(
-        season_id: Optional[str] = Query(None, description="Filter by season"),
-        crop_id: Optional[str] = Query(None, description="Filter by crop"),
-        plan_versions: Optional[str] = Query("V1.0-Maximized-Productivity", description="Plan revision version"),
-        value_types: str = Query("actual", description="Value type: actual or forecast"),
-        limit: int = Query(1000),
-        offset: int = Query(0)
+    season_id: Optional[str] = Query(None, description="Filter by season"),
+    crop_id: Optional[str] = Query(None, description="Filter by crop"),
+    plan_versions: Optional[str] = Query("v1.0-Maximized-Productivity", description="Plan revision version"),
+    value_types: str = Query("actual", description="Value type: actual or forecast"),
+    limit_actuals_to_planned: bool = Query(
+        False,
+        description="If true, only include records where planned production_allocation > 0 (limits actuals to planned villages)"
+    ),
+    limit: int = Query(1000),
+    offset: int = Query(0)
 ):
     """
     Compare plan values with actual or forecast values using yield_inspection_view
     FIXED: Added proper 2 decimal place rounding for all numeric values
+    NEW: Added limit_actuals_to_planned checkbox to filter only planned villages
     """
     if not season_id:
-        season_id = "RABI_24_25"
+        season_id = "RABI_25_26"
 
     valid_types = ["actual", "forecast"]
     if value_types not in valid_types:
@@ -385,6 +418,10 @@ def get_seed_forecast_comparison(
             conditions.append("plan_revision_version = %(version)s")
             params["version"] = plan_versions
 
+        # NEW: Limit actuals to planned villages (production_allocation > 0)
+        if limit_actuals_to_planned:
+            conditions.append("production_allocation > 0")
+
         condition_str = ""
         if conditions:
             condition_str = " AND " + " AND ".join(conditions)
@@ -392,7 +429,7 @@ def get_seed_forecast_comparison(
         # Build query parts
         query_parts = []
 
-        # FIXED: Plan data CTE with ROUND to 2 decimal places
+        # Plan data CTE with ROUND to 2 decimal places
         plan_cte = f"""
         plan_data AS (
             SELECT 
@@ -400,14 +437,43 @@ def get_seed_forecast_comparison(
                 crop,
                 variety,
                 ROUND(SUM(COALESCE(production_allocation, 0))::NUMERIC, 2) as plan_value
-            FROM operations.supply_chain_planning
+            FROM operations_demo.supply_chain_planning
             WHERE production_allocation IS NOT NULL{condition_str}
             GROUP BY season, crop, variety
         )"""
         query_parts.append(plan_cte)
 
+        # Target data CTE - aggregate target_kgs from operations_demo.targets
+        # Match by plan_year, season_id, crop_id, state, variety_id
+        # Join with lookup tables to get season, crop, variety names for matching
+        # Aggregate across states and plan_years since output groups by season, crop, variety
+        target_conditions = []
+        target_conditions.append("t.target_kgs IS NOT NULL")
+        target_conditions.append("s.season_name IS NOT NULL")
+        target_conditions.append("s.season_name ILIKE %(season)s")
+        if crop_id:
+            target_conditions.append("c.crop_name ILIKE %(crop)s")
+        
+        target_where_clause = " AND ".join(target_conditions) if target_conditions else "1=1"
+        
+        target_cte = f"""
+        target_data AS (
+            SELECT 
+                COALESCE(s.season_name, '') as season,
+                COALESCE(c.crop_name, '') as crop,
+                COALESCE(v.variety_name, '') as variety,
+                ROUND(SUM(COALESCE(t.target_kgs, 0))::NUMERIC, 2) as target_value
+            FROM operations_demo.targets t
+            LEFT JOIN operations_demo.seasons s ON t.season_id = s.season_id
+            LEFT JOIN operations_demo.crops c ON t.crop_id = c.crop_id
+            LEFT JOIN operations_demo.varieties v ON t.variety_id = v.variety_id
+            WHERE {target_where_clause}
+            GROUP BY s.season_name, c.crop_name, v.variety_name
+        )"""
+        query_parts.append(target_cte)
+
         if value_types == "actual":
-            # FIXED: Actual data CTE with ROUND to 2 decimal places
+            # Actual data CTE with ROUND to 2 decimal places
             actual_cte = f"""
             actual_data AS (
                 SELECT 
@@ -415,13 +481,13 @@ def get_seed_forecast_comparison(
                     crop,
                     variety,
                     ROUND(SUM(COALESCE(actual_received_qty, 0))::NUMERIC, 2) as actual_value
-                FROM operations.supply_chain_planning
+                FROM operations_demo.supply_chain_planning
                 WHERE actual_received_qty IS NOT NULL{condition_str}
                 GROUP BY season, crop, variety
             )"""
             query_parts.append(actual_cte)
         else:  # forecast
-            # FIXED: Forecast data CTE with ROUND to 2 decimal places
+            # Forecast data CTE with ROUND to 2 decimal places
             forecast_cte = f"""
             forecast_data AS (
                 SELECT 
@@ -439,10 +505,10 @@ def get_seed_forecast_comparison(
                             END
                         )::NUMERIC, 2
                     ) as forecast_value
-                FROM operations.yield_inspection_view v
+                FROM operations_demo.yield_inspection_view v
                 WHERE (v.stage_forecast1 IS NOT NULL OR v.stage_forecast2 IS NOT NULL)
-                  AND v.season_name ILIKE %(season)s
-                  {f"AND v.crop_name ILIKE %(crop)s" if crop_id else ""}
+                    AND v.season_name ILIKE %(season)s
+                    {f"AND v.crop_name ILIKE %(crop)s" if crop_id else ""}
                 GROUP BY v.season_name, v.crop_name, v.variety_name
                 HAVING ROUND(
                     SUM(
@@ -458,40 +524,52 @@ def get_seed_forecast_comparison(
             )"""
             query_parts.append(forecast_cte)
 
-        # FIXED: Main SELECT with ROUND to 2 decimal places
+        # Main SELECT with ROUND to 2 decimal places
         if value_types == "actual":
             main_select = """
             SELECT 
-                COALESCE(p.season, a.season) as season,
-                COALESCE(p.crop, a.crop) as crop,
-                COALESCE(p.variety, a.variety) as variety,
+                COALESCE(p.season, a.season, t.season) as season,
+                COALESCE(p.crop, a.crop, t.crop) as crop,
+                COALESCE(p.variety, a.variety, t.variety) as variety,
                 ROUND(COALESCE(p.plan_value, 0)::NUMERIC, 2) as plan_value,
-                ROUND(COALESCE(a.actual_value, 0)::NUMERIC, 2) as actual_value
+                ROUND(COALESCE(a.actual_value, 0)::NUMERIC, 2) as actual_value,
+                ROUND(COALESCE(t.target_value, 0)::NUMERIC, 2) as target_value
             FROM plan_data p
             FULL OUTER JOIN actual_data a ON (
                 UPPER(TRIM(p.season)) = UPPER(TRIM(a.season)) AND 
                 UPPER(TRIM(p.crop)) = UPPER(TRIM(a.crop)) AND 
                 UPPER(TRIM(p.variety)) = UPPER(TRIM(a.variety))
             )
-            WHERE (COALESCE(p.season, a.season) IS NOT NULL)
+            FULL OUTER JOIN target_data t ON (
+                UPPER(TRIM(COALESCE(p.season, a.season))) = UPPER(TRIM(t.season)) AND 
+                UPPER(TRIM(COALESCE(p.crop, a.crop))) = UPPER(TRIM(t.crop)) AND 
+                UPPER(TRIM(COALESCE(p.variety, a.variety))) = UPPER(TRIM(t.variety))
+            )
+            WHERE (COALESCE(p.season, a.season, t.season) IS NOT NULL)
             ORDER BY season, crop, variety
             LIMIT %(limit)s OFFSET %(offset)s
             """
         else:  # forecast
             main_select = """
             SELECT 
-                COALESCE(p.season, f.season) as season,
-                COALESCE(p.crop, f.crop) as crop,
-                COALESCE(p.variety, f.variety) as variety,
+                COALESCE(p.season, f.season, t.season) as season,
+                COALESCE(p.crop, f.crop, t.crop) as crop,
+                COALESCE(p.variety, f.variety, t.variety) as variety,
                 ROUND(COALESCE(p.plan_value, 0)::NUMERIC, 2) as plan_value,
-                ROUND(COALESCE(f.forecast_value, 0)::NUMERIC, 2) as forecast_value
+                ROUND(COALESCE(f.forecast_value, 0)::NUMERIC, 2) as forecast_value,
+                ROUND(COALESCE(t.target_value, 0)::NUMERIC, 2) as target_value
             FROM plan_data p
             FULL OUTER JOIN forecast_data f ON (
                 UPPER(TRIM(p.season)) = UPPER(TRIM(f.season)) AND 
                 UPPER(TRIM(p.crop)) = UPPER(TRIM(f.crop)) AND 
                 UPPER(TRIM(p.variety)) = UPPER(TRIM(f.variety))
             )
-            WHERE (COALESCE(p.season, f.season) IS NOT NULL)
+            FULL OUTER JOIN target_data t ON (
+                UPPER(TRIM(COALESCE(p.season, f.season))) = UPPER(TRIM(t.season)) AND 
+                UPPER(TRIM(COALESCE(p.crop, f.crop))) = UPPER(TRIM(t.crop)) AND 
+                UPPER(TRIM(COALESCE(p.variety, f.variety))) = UPPER(TRIM(t.variety))
+            )
+            WHERE (COALESCE(p.season, f.season, t.season) IS NOT NULL)
             ORDER BY season, crop, variety
             LIMIT %(limit)s OFFSET %(offset)s
             """
@@ -503,14 +581,15 @@ def get_seed_forecast_comparison(
         cur.execute(full_query, params)
         rows = cur.fetchall()
 
-        # FIXED: Process results with additional Python-side rounding for safety
+        # Process results with additional Python-side rounding for safety
         processed_rows = []
         for row in rows:
             row_dict = {
                 'season': row['season'],
                 'crop': row['crop'],
                 'variety': row['variety'],
-                'plan_value': round(safe_float_convert(row.get('plan_value', 0)), 2)  # Additional rounding
+                'plan_value': round(safe_float_convert(row.get('plan_value', 0)), 2),
+                'target_value': round(safe_float_convert(row.get('target_value', 0)), 2)
             }
 
             if value_types == "actual":
@@ -520,16 +599,16 @@ def get_seed_forecast_comparison(
 
             processed_rows.append(row_dict)
 
-        # Get available forecast seasons (fixed to return just strings, not arrays)
+        # Get available forecast seasons
         available_seasons = []
         try:
             cur.execute("""
                 SELECT DISTINCT season_name 
-                FROM operations.yield_inspection_view 
+                FROM operations_demo.yield_inspection_view 
                 WHERE stage_forecast1 IS NOT NULL OR stage_forecast2 IS NOT NULL
                 ORDER BY season_name
             """)
-            available_seasons = [row[0] for row in cur.fetchall()]  # Extract strings, not arrays
+            available_seasons = [row[0] for row in cur.fetchall()]
         except:
             available_seasons = ["Error fetching seasons"]
 
@@ -538,7 +617,8 @@ def get_seed_forecast_comparison(
             {"db_column_name": "season", "display_name": "Season", "type": "string", "is_visible": True},
             {"db_column_name": "crop", "display_name": "Crop", "type": "string", "is_visible": True},
             {"db_column_name": "variety", "display_name": "Variety", "type": "string", "is_visible": True},
-            {"db_column_name": "plan_value", "display_name": "Plan Value", "type": "decimal", "is_visible": True}
+            {"db_column_name": "plan_value", "display_name": "Plan Value", "type": "decimal", "is_visible": True},
+            {"db_column_name": "target_value", "display_name": "Target Value", "type": "decimal", "is_visible": True}
         ]
 
         if value_types == "actual":
@@ -562,7 +642,8 @@ def get_seed_forecast_comparison(
                 "is_default_season": season_id == "RABI_24_25",
                 "total_records": len(processed_rows),
                 "data_type": value_types,
-                "available_forecast_seasons": available_seasons,  # Now returns clean strings
+                "limit_actuals_to_planned": limit_actuals_to_planned,  # NEW: expose checkbox state
+                "available_forecast_seasons": available_seasons,
                 "data_source": "yield_inspection_view"
             },
             "columns": columns,
@@ -579,6 +660,7 @@ def get_seed_forecast_comparison(
         if 'cur' in locals():
             cur.close()
         release_connection(conn)
+
 
 
 # FIXED: Enhanced safe_float_convert function with rounding
@@ -626,7 +708,7 @@ def get_comparison_summary(
                 CASE WHEN %s = 'actual' THEN COALESCE(scp.actual_received_qty, 0)
                      WHEN %s = 'plan' THEN COALESCE(scp.production_allocation, 0)
                      ELSE 0 END as value_2
-            FROM operations.supply_chain_planning scp
+            FROM operations_demo.supply_chain_planning scp
             WHERE 1=1
         """
 
@@ -689,82 +771,577 @@ def get_comparison_summary(
         release_connection(conn)
 
 
+@router.get("/seed-forecast/state-variety-summary/dropdown")
+def get_state_variety_summary_dropdown(
+    plan_revision_version: Optional[str] = Query(None, description="Plan revision version filter (optional)"),
+    season: Optional[str] = Query(None, description="Season filter (requires plan_revision_version)"),
+    crop: Optional[str] = Query(None, description="Crop filter (requires season)"),
+    state: Optional[str] = Query(None, description="State filter (requires crop)"),
+    variety: Optional[str] = Query(None, description="Variety filter (requires state)")
+):
+    """
+    Get dropdown options for state-variety-summary filters
+    Cascading dropdown sequence: plan_revision_version → season → crop → state → variety → deviation_type
+    Each dropdown includes "ALL" as the first option
+    """
+    conn = get_connection()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        result = {}
+
+        # Step 1: Plan revision version dropdown (always show if not selected)
+        if not plan_revision_version:
+            cur.execute("""
+                SELECT DISTINCT plan_revision_version
+                FROM operations_demo.supply_chain_vs_yield_view
+                WHERE plan_revision_version IS NOT NULL AND plan_revision_version != ''
+                ORDER BY plan_revision_version DESC
+            """)
+            versions = [row['plan_revision_version'] for row in cur.fetchall()]
+            result["plan_revision_version"] = versions
+
+        # Step 2: Season dropdown (show if plan_revision_version is selected)
+        if plan_revision_version and not season:
+            query_params = {}
+            query_conditions = []
+            
+            if plan_revision_version and plan_revision_version != "ALL":
+                query_conditions.append("plan_revision_version = %(plan_revision_version)s")
+                query_params["plan_revision_version"] = plan_revision_version
+            
+            where_clause = " AND " + " AND ".join(query_conditions) if query_conditions else ""
+            
+            cur.execute(f"""
+                SELECT DISTINCT season
+                FROM operations_demo.supply_chain_vs_yield_view
+                WHERE 1=1 {where_clause}
+                  AND season IS NOT NULL AND season != ''
+                ORDER BY season DESC
+            """, query_params)
+            seasons = ["ALL"] + [row['season'] for row in cur.fetchall()]
+            result["season"] = seasons
+
+        # Step 3: Crop dropdown (show if season is selected)
+        if season and not crop:
+            query_params = {}
+            query_conditions = []
+            
+            if plan_revision_version and plan_revision_version != "ALL":
+                query_conditions.append("plan_revision_version = %(plan_revision_version)s")
+                query_params["plan_revision_version"] = plan_revision_version
+            if season and season != "ALL":
+                query_conditions.append("season = %(season)s")
+                query_params["season"] = season
+            
+            where_clause = " AND " + " AND ".join(query_conditions) if query_conditions else ""
+            
+            cur.execute(f"""
+                SELECT DISTINCT crop
+                FROM operations_demo.supply_chain_vs_yield_view
+                WHERE 1=1 {where_clause}
+                  AND crop IS NOT NULL AND crop != ''
+                ORDER BY crop
+            """, query_params)
+            crops = ["ALL"] + [row['crop'] for row in cur.fetchall()]
+            result["crop"] = crops
+
+        # Step 4: State dropdown (show if crop is selected)
+        if crop and not state:
+            query_params = {}
+            query_conditions = []
+            
+            if plan_revision_version and plan_revision_version != "ALL":
+                query_conditions.append("plan_revision_version = %(plan_revision_version)s")
+                query_params["plan_revision_version"] = plan_revision_version
+            if season and season != "ALL":
+                query_conditions.append("season = %(season)s")
+                query_params["season"] = season
+            if crop and crop != "ALL":
+                query_conditions.append("crop = %(crop)s")
+                query_params["crop"] = crop
+            
+            where_clause = " AND " + " AND ".join(query_conditions) if query_conditions else ""
+            
+            cur.execute(f"""
+                SELECT DISTINCT state
+                FROM operations_demo.supply_chain_vs_yield_view
+                WHERE 1=1 {where_clause}
+                  AND state IS NOT NULL AND state != ''
+                ORDER BY state
+            """, query_params)
+            states = ["ALL"] + [row['state'] for row in cur.fetchall()]
+            result["state"] = states
+
+        # Step 5: Variety dropdown (show if state is selected)
+        if state and not variety:
+            query_params = {}
+            query_conditions = []
+            
+            if plan_revision_version and plan_revision_version != "ALL":
+                query_conditions.append("plan_revision_version = %(plan_revision_version)s")
+                query_params["plan_revision_version"] = plan_revision_version
+            if season and season != "ALL":
+                query_conditions.append("season = %(season)s")
+                query_params["season"] = season
+            if crop and crop != "ALL":
+                query_conditions.append("crop = %(crop)s")
+                query_params["crop"] = crop
+            if state and state != "ALL":
+                query_conditions.append("state = %(state)s")
+                query_params["state"] = state
+            
+            where_clause = " AND " + " AND ".join(query_conditions) if query_conditions else ""
+            
+            cur.execute(f"""
+                SELECT DISTINCT variety
+                FROM operations_demo.supply_chain_vs_yield_view
+                WHERE 1=1 {where_clause}
+                  AND variety IS NOT NULL AND variety != ''
+                ORDER BY variety
+            """, query_params)
+            varieties = ["ALL"] + [row['variety'] for row in cur.fetchall()]
+            result["variety"] = varieties
+
+        # Step 6: Deviation_type dropdown (show if variety is selected)
+        if variety:
+            result["deviation_type"] = [
+                "actual_vs_target",
+                "plan_vs_target",
+                "actual_vs_plan"
+            ]
+
+        return result
+
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching dropdown options: {str(e)}")
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        release_connection(conn)
+
+
 @router.get("/seed-forecast/state-variety-summary")
-def get_state_variety_summary():
+def get_state_variety_summary(
+    plan_revision_version: Optional[str] = Query(None, description="Plan revision version filter (required)"),
+    season: Optional[str] = Query(None, description="Season filter (requires plan_revision_version)"),
+    crop: Optional[str] = Query(None, description="Crop filter (requires season)"),
+    state: Optional[str] = Query(None, description="State filter (requires crop)"),
+    variety: Optional[str] = Query(None, description="Variety filter (requires state)"),
+    deviation_type: Optional[str] = Query(None, description="Deviation calculation type: actual_vs_target, plan_vs_target, or actual_vs_plan"),
+    limit_actuals_to_planned: bool = Query(
+        False,
+        description="If true, only include records where planned production_allocation > 0 (limits actuals to planned villages)"
+    )
+):
     """
     Get state-variety summary with planning vs actual values
-    Uses latest season - 1 (24-25 if latest is 25-26) if available, otherwise uses latest season
-
+    Cascading filter flow: plan_revision_version → season → crop → state → variety → deviation_type
+    All filters follow strict sequence - no hardcoded defaults
+    Each filter includes "ALL" option from dropdown
+    
     Response structure includes column metadata and data array
     """
     conn = get_connection()
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        # Fixed query with proper CTE structure
-        cur.execute("""
-            WITH all_seasons AS (
-                SELECT DISTINCT
-                    season,
-                    plan_revision_version,
-                    CASE 
-                        WHEN season ~ '\d{2}-\d{2}' THEN
-                            CAST(SPLIT_PART(SUBSTRING(season FROM '\d{2}-\d{2}'), '-', 1) AS INTEGER)
-                        ELSE 0
-                    END as start_year
-                FROM operations.supply_chain_vs_yield_view
-                WHERE season IS NOT NULL 
-                  AND season != ''
-                  AND season ~ '\d{2}-\d{2}'  -- Only seasons with year pattern
-            ),
-            ranked_seasons AS (
+        # Set defaults for deviation_type if not provided
+        if not deviation_type:
+            deviation_type = "actual_vs_target"
+
+        # Validate deviation_type
+        valid_deviation_types = ["actual_vs_target", "plan_vs_target", "actual_vs_plan"]
+        if deviation_type not in valid_deviation_types:
+            raise HTTPException(status_code=400, detail=f"Invalid deviation_type. Must be one of: {', '.join(valid_deviation_types)}")
+
+        # If no filters are provided, load default metadata summary
+        # Filters follow cascading sequence: plan_revision_version → season → crop → state → variety
+        if not plan_revision_version and not season and not crop and not state and not variety:
+            # Load default aggregated data grouped by state and variety
+            # Build default query without filters
+            where_conditions = [
+                "state IS NOT NULL AND state != ''",
+                "variety IS NOT NULL AND variety != ''",
+                "(production_allocation > 0 OR actual_received_qty > 0)"
+            ]
+            
+            if limit_actuals_to_planned:
+                where_conditions.append("production_allocation > 0")
+            
+            where_clause = " AND ".join(where_conditions)
+            
+            # Build target_data CTE for default query
+            target_conditions = ["t.target_kgs IS NOT NULL"]
+            target_where_clause = " AND ".join(target_conditions)
+            
+            target_cte = f"""
+            target_data AS (
                 SELECT 
-                    season,
-                    plan_revision_version,
-                    start_year,
-                    ROW_NUMBER() OVER (ORDER BY plan_revision_version DESC, start_year DESC) as rank
-                FROM all_seasons
-            ),
-            selected_seasons AS (
-                SELECT season, plan_revision_version, rank FROM ranked_seasons WHERE rank = 2
-                UNION ALL
-                SELECT season, plan_revision_version, rank FROM ranked_seasons WHERE rank = 1
-                  AND NOT EXISTS (SELECT 1 FROM ranked_seasons WHERE rank = 2)
+                    UPPER(TRIM(COALESCE(t.state, ''))) as state,
+                    UPPER(TRIM(COALESCE(v.variety_name, ''))) as variety,
+                    ROUND(SUM(COALESCE(t.target_kgs, 0))::NUMERIC, 2) as target_value
+                FROM operations_demo.targets t
+                LEFT JOIN operations_demo.seasons s ON t.season_id = s.season_id
+                LEFT JOIN operations_demo.crops c ON t.crop_id = c.crop_id
+                LEFT JOIN operations_demo.varieties v ON t.variety_id = v.variety_id
+                WHERE {target_where_clause}
+                    AND t.state IS NOT NULL 
+                    AND t.state != ''
+                    AND v.variety_name IS NOT NULL
+                    AND v.variety_name != ''
+                GROUP BY UPPER(TRIM(COALESCE(t.state, ''))), UPPER(TRIM(COALESCE(v.variety_name, '')))
+            )"""
+            
+            # Build SELECT clause for default query
+            select_parts = ["m.state", "m.variety"]
+            select_parts.extend([
+                "m.plan_value", 
+                "m.actual_value", 
+                "COALESCE(t.target_value, 0) as target_value",
+                """CASE
+                    WHEN %(deviation_type)s = 'actual_vs_target' AND COALESCE(t.target_value, 0) > 0
+                        THEN ROUND(((m.actual_value - COALESCE(t.target_value, 0)) / COALESCE(t.target_value, 0)) * 100::NUMERIC, 2)
+                    WHEN %(deviation_type)s = 'plan_vs_target' AND COALESCE(t.target_value, 0) > 0
+                        THEN ROUND(((m.plan_value - COALESCE(t.target_value, 0)) / COALESCE(t.target_value, 0)) * 100::NUMERIC, 2)
+                    WHEN %(deviation_type)s = 'actual_vs_plan' AND COALESCE(m.plan_value, 0) > 0
+                        THEN ROUND(((m.actual_value - m.plan_value) / m.plan_value) * 100::NUMERIC, 2)
+                    ELSE 0
+                END as deviation_pct"""
+            ])
+            select_clause_final = ", ".join(select_parts)
+            
+            # Default query
+            default_query = f"""
+            WITH {target_cte},
+            main_data AS (
+                SELECT 
+                    state,
+                    variety,
+                    SUM(COALESCE(production_allocation, 0)) as plan_value,
+                    SUM(COALESCE(actual_received_qty, 0)) as actual_value
+                FROM operations_demo.supply_chain_vs_yield_view
+                WHERE {where_clause}
+                GROUP BY state, variety
             )
-            SELECT season, plan_revision_version
-            FROM selected_seasons
-            ORDER BY rank
-            LIMIT 1
-        """)
+            SELECT 
+                {select_clause_final}
+            FROM main_data m
+            LEFT JOIN target_data t ON (
+                UPPER(TRIM(m.state)) = t.state AND 
+                UPPER(TRIM(m.variety)) = t.variety
+            )
+            ORDER BY m.state, m.variety
+            LIMIT 1000
+            """
+            
+            params = {"deviation_type": deviation_type}
+            cur.execute(default_query, params)
+            rows = cur.fetchall()
+            
+            # Process default results
+            processed_rows = []
+            for row in rows:
+                deviation_pct_value = row.get('deviation_pct')
+                if deviation_pct_value is not None:
+                    deviation_pct_value = round(safe_float_convert(deviation_pct_value), 2)
+                else:
+                    deviation_pct_value = 0.0
+                
+                row_dict = {
+                    'state': row['state'],
+                    'variety': row['variety'],
+                    'plan_value': safe_float_convert(row['plan_value']),
+                    'actual_value': safe_float_convert(row['actual_value']),
+                    'target_value': safe_float_convert(row.get('target_value', 0)),
+                    'deviation_pct': deviation_pct_value
+                }
+                processed_rows.append(row_dict)
+            
+            # Build columns based on deviation_type (same logic as below)
+            columns = [
+                {
+                    "db_column_name": "state",
+                    "display_name": "State",
+                    "type": "string",
+                    "group_name": "Location",
+                    "is_visible": True,
+                    "is_editable": False
+                },
+                {
+                    "db_column_name": "variety",
+                    "display_name": "Variety",
+                    "type": "string",
+                    "group_name": "Basic Info",
+                    "is_visible": True,
+                    "is_editable": False
+                }
+            ]
+            
+            # Add columns based on deviation_type
+            if deviation_type == "actual_vs_target":
+                columns.extend([
+                    {
+                        "db_column_name": "actual_value",
+                        "display_name": "Actual Received Qty",
+                        "type": "decimal",
+                        "group_name": "Actual",
+                        "is_visible": True,
+                        "is_editable": False
+                    },
+                    {
+                        "db_column_name": "target_value",
+                        "display_name": "Target Value",
+                        "type": "decimal",
+                        "group_name": "Target",
+                        "is_visible": True,
+                        "is_editable": False
+                    },
+                    {
+                        "db_column_name": "plan_value",
+                        "display_name": "Planned Production",
+                        "type": "decimal",
+                        "group_name": "Planning",
+                        "is_visible": True,
+                        "is_editable": False
+                    },
+                    {
+                        "db_column_name": "deviation_pct",
+                        "display_name": "Deviation (%)",
+                        "type": "decimal",
+                        "group_name": "Analysis",
+                        "is_visible": True,
+                        "is_editable": False
+                    }
+                ])
+            elif deviation_type == "plan_vs_target":
+                columns.extend([
+                    {
+                        "db_column_name": "plan_value",
+                        "display_name": "Planned Production",
+                        "type": "decimal",
+                        "group_name": "Planning",
+                        "is_visible": True,
+                        "is_editable": False
+                    },
+                    {
+                        "db_column_name": "target_value",
+                        "display_name": "Target Value",
+                        "type": "decimal",
+                        "group_name": "Target",
+                        "is_visible": True,
+                        "is_editable": False
+                    },
+                    {
+                        "db_column_name": "actual_value",
+                        "display_name": "Actual Received Qty",
+                        "type": "decimal",
+                        "group_name": "Actual",
+                        "is_visible": True,
+                        "is_editable": False
+                    },
+                    {
+                        "db_column_name": "deviation_pct",
+                        "display_name": "Deviation (%)",
+                        "type": "decimal",
+                        "group_name": "Analysis",
+                        "is_visible": True,
+                        "is_editable": False
+                    }
+                ])
+            else:  # actual_vs_plan
+                columns.extend([
+                    {
+                        "db_column_name": "actual_value",
+                        "display_name": "Actual Received Qty",
+                        "type": "decimal",
+                        "group_name": "Actual",
+                        "is_visible": True,
+                        "is_editable": False
+                    },
+                    {
+                        "db_column_name": "plan_value",
+                        "display_name": "Planned Production",
+                        "type": "decimal",
+                        "group_name": "Planning",
+                        "is_visible": True,
+                        "is_editable": False
+                    },
+                    {
+                        "db_column_name": "target_value",
+                        "display_name": "Target Value",
+                        "type": "decimal",
+                        "group_name": "Target",
+                        "is_visible": True,
+                        "is_editable": False
+                    },
+                    {
+                        "db_column_name": "deviation_pct",
+                        "display_name": "Deviation (%)",
+                        "type": "decimal",
+                        "group_name": "Analysis",
+                        "is_visible": True,
+                        "is_editable": False
+                    }
+                ])
+            
+            metadata = {
+                "total_records": len(processed_rows),
+                "limit_actuals_to_planned": limit_actuals_to_planned,
+                "filters_applied": {
+                    "plan_revision_version": None,
+                    "season": None,
+                    "crop": None,
+                    "state": None,
+                    "variety": None,
+                    "deviation_type": deviation_type
+                },
+                "is_default_summary": True
+            }
+            
+            return {
+                "metadata": metadata,
+                "columns": columns,
+                "data": processed_rows
+            }
 
-        season_row = cur.fetchone()
-        if not season_row:
-            raise HTTPException(status_code=404, detail="No season data found in supply chain planning")
+        # Determine GROUP BY fields - always group by state and variety
+        # Follows same flow as dropdown: season → crop → state → variety
+        group_by_fields = ["state", "variety"]
+        select_fields = ["state", "variety"]
+        include_village = False
 
-        selected_season = season_row['season']
-        selected_version = season_row['plan_revision_version']
+        # Build main query with dynamic WHERE and GROUP BY
+        select_clause = ", ".join(select_fields)
+        group_by_clause = ", ".join(group_by_fields)
 
-        # Main query to get state-variety combinations
-        main_query = """
+        # Build WHERE conditions dynamically
+        # Follow cascading filter flow: plan_revision_version → season → crop → state → variety
+        # Handle "ALL" values from dropdown (means no filter applied for that field)
+        where_conditions = [
+            "state IS NOT NULL AND state != ''",
+            "variety IS NOT NULL AND variety != ''",
+            "(production_allocation > 0 OR actual_received_qty > 0)"
+        ]
+        
+        # Add plan_revision_version filter (required, but can be "ALL")
+        # Use UPPER(TRIM()) for case-insensitive and whitespace-tolerant matching
+        if plan_revision_version and plan_revision_version != "ALL":
+            where_conditions.append("UPPER(TRIM(plan_revision_version)) = UPPER(TRIM(%(version)s))")
+        
+        # Add season filter (required, but can be "ALL")
+        # Use UPPER(TRIM()) for case-insensitive and whitespace-tolerant matching
+        if season and season != "ALL":
+            where_conditions.append("UPPER(TRIM(season)) = UPPER(TRIM(%(season)s))")
+        
+        # Add optional filters only if they are provided and not "ALL"
+        # Use UPPER(TRIM()) for case-insensitive and whitespace-tolerant matching
+        if crop and crop != "ALL":
+            where_conditions.append("UPPER(TRIM(crop)) = UPPER(TRIM(%(crop)s))")
+        if state and state != "ALL":
+            where_conditions.append("UPPER(TRIM(state)) = UPPER(TRIM(%(state)s))")
+        if variety and variety != "ALL":
+            where_conditions.append("UPPER(TRIM(variety)) = UPPER(TRIM(%(variety)s))")
+        
+        # NEW: Limit actuals to planned villages (production_allocation > 0)
+        if limit_actuals_to_planned:
+            where_conditions.append("production_allocation > 0")
+        
+        where_clause = " AND ".join(where_conditions)
+        
+        # Build target_data CTE - aggregate target_kgs from operations_demo.targets
+        # Always aggregate at state + variety level for the selected season/crop
+        # Match by season_id and crop_id only (not state/variety filters)
+        # Use UPPER(TRIM()) for state and variety to ensure exact matching with main_data
+        target_conditions = []
+        target_conditions.append("t.target_kgs IS NOT NULL")
+        # Only filter by season if season is provided and not "ALL"
+        # Use UPPER(TRIM()) for case-insensitive and whitespace-tolerant matching
+        if season and season != "ALL":
+            target_conditions.append("UPPER(TRIM(s.season_name)) = UPPER(TRIM(%(season)s))")
+        # Only filter by crop if crop is provided and not "ALL"
+        if crop and crop != "ALL":
+            target_conditions.append("UPPER(TRIM(c.crop_name)) = UPPER(TRIM(%(crop)s))")
+        
+        target_where_clause = " AND ".join(target_conditions)
+        
+        target_cte = f"""
+        target_data AS (
+            SELECT 
+                UPPER(TRIM(COALESCE(t.state, ''))) as state,
+                UPPER(TRIM(COALESCE(v.variety_name, ''))) as variety,
+                ROUND(SUM(COALESCE(t.target_kgs, 0))::NUMERIC, 2) as target_value
+            FROM operations_demo.targets t
+            LEFT JOIN operations_demo.seasons s ON t.season_id = s.season_id
+            LEFT JOIN operations_demo.crops c ON t.crop_id = c.crop_id
+            LEFT JOIN operations_demo.varieties v ON t.variety_id = v.variety_id
+            WHERE {target_where_clause}
+                AND t.state IS NOT NULL 
+                AND t.state != ''
+                AND v.variety_name IS NOT NULL
+                AND v.variety_name != ''
+            GROUP BY UPPER(TRIM(COALESCE(t.state, ''))), UPPER(TRIM(COALESCE(v.variety_name, '')))
+        )"""
+        
+        # Build SELECT clause for final query
+        # Note: Use original state/variety from main_data (not UPPER/TRIM) for display
+        # Calculate deviation (%) based on deviation_type: ((base_value - reference_value) / reference_value) * 100
+        select_parts = [f"m.{field}" for field in select_fields]
+        select_parts.extend([
+            "m.plan_value", 
+            "m.actual_value", 
+            "COALESCE(t.target_value, 0) as target_value",
+            """CASE
+                WHEN %(deviation_type)s = 'actual_vs_target' AND COALESCE(t.target_value, 0) > 0
+                    THEN ROUND(((m.actual_value - COALESCE(t.target_value, 0)) / COALESCE(t.target_value, 0)) * 100::NUMERIC, 2)
+                WHEN %(deviation_type)s = 'plan_vs_target' AND COALESCE(t.target_value, 0) > 0
+                    THEN ROUND(((m.plan_value - COALESCE(t.target_value, 0)) / COALESCE(t.target_value, 0)) * 100::NUMERIC, 2)
+                WHEN %(deviation_type)s = 'actual_vs_plan' AND COALESCE(m.plan_value, 0) > 0
+                    THEN ROUND(((m.actual_value - m.plan_value) / m.plan_value) * 100::NUMERIC, 2)
+                ELSE NULL
+            END as deviation_pct"""
+        ])
+        select_clause_final = ", ".join(select_parts)
+        
+        # Main query using CTE with LEFT JOIN for target_data
+        # JOIN uses UPPER(TRIM()) to ensure exact matching regardless of case/whitespace
+        main_query = f"""
+        WITH {target_cte},
+        main_data AS (
+            SELECT 
+                {select_clause},
+                SUM(COALESCE(production_allocation, 0)) as plan_value,
+                SUM(COALESCE(actual_received_qty, 0)) as actual_value
+            FROM operations_demo.supply_chain_vs_yield_view
+            WHERE {where_clause}
+            GROUP BY {group_by_clause}
+        )
         SELECT 
-            state,
-            variety,
-            SUM(COALESCE(production_allocation, 0)) as plan_value,
-            SUM(COALESCE(actual_received_qty, 0)) as actual_value
-        FROM operations.supply_chain_vs_yield_view
-        WHERE season = %(season)s 
-          AND plan_revision_version = %(version)s
-          AND state IS NOT NULL AND state != ''
-          AND variety IS NOT NULL AND variety != ''
-          AND (production_allocation > 0 OR actual_received_qty > 0)
-        GROUP BY state, variety
-        ORDER BY state, variety
+            {select_clause_final}
+        FROM main_data m
+        LEFT JOIN target_data t ON (
+            UPPER(TRIM(m.state)) = t.state AND 
+            UPPER(TRIM(m.variety)) = t.variety
+        )
+        ORDER BY {", ".join([f"m.{field}" for field in group_by_fields])}
         """
 
         params = {
-            "season": selected_season,
-            "version": selected_version
+            "deviation_type": deviation_type
         }
+        
+        # Add filter params only if they are provided and not "ALL"
+        if plan_revision_version and plan_revision_version != "ALL":
+            params["version"] = plan_revision_version
+        if season and season != "ALL":
+            params["season"] = season
+        if crop and crop != "ALL":
+            params["crop"] = crop
+        if state and state != "ALL":
+            params["state"] = state
+        if variety and variety != "ALL":
+            params["variety"] = variety
 
         cur.execute(main_query, params)
         rows = cur.fetchall()
@@ -772,12 +1349,26 @@ def get_state_variety_summary():
         # Process the results
         processed_rows = []
         for row in rows:
+            # Handle deviation_pct: convert NULL to 0
+            deviation_pct_value = row.get('deviation_pct')
+            if deviation_pct_value is not None:
+                deviation_pct_value = round(safe_float_convert(deviation_pct_value), 2)
+            else:
+                deviation_pct_value = 0.0
+            
             row_dict = {
                 'state': row['state'],
                 'variety': row['variety'],
                 'plan_value': safe_float_convert(row['plan_value']),
-                'actual_value': safe_float_convert(row['actual_value'])
+                'actual_value': safe_float_convert(row['actual_value']),
+                'target_value': safe_float_convert(row.get('target_value', 0)),
+                'deviation_pct': deviation_pct_value
             }
+            # Only include village if it's in the group by
+            if include_village:
+                row_dict['village'] = row['village'] if row['village'] else None
+            else:
+                row_dict['village'] = None
             processed_rows.append(row_dict)
 
         # Column metadata
@@ -797,42 +1388,163 @@ def get_state_variety_summary():
                 "group_name": "Basic Info",
                 "is_visible": True,
                 "is_editable": False
-            },
-            {
-                "db_column_name": "plan_value",
-                "display_name": "Planned Production",
-                "type": "decimal",
-                "group_name": "Planning",
-                "is_visible": True,
-                "is_editable": False
-            },
-            {
-                "db_column_name": "actual_value",
-                "display_name": "Actual Received Qty",
-                "type": "decimal",
-                "group_name": "Actual",
-                "is_visible": True,
-                "is_editable": False
             }
         ]
+        
+        # Add village column only when it's included in the results
+        if include_village:
+            columns.append({
+                "db_column_name": "village",
+                "display_name": "Village",
+                "type": "string",
+                "group_name": "Location",
+                "is_visible": True,
+                "is_editable": False
+            })
+        
+        # Order columns based on deviation_type for heatmap
+        # Heatmap fields should follow deviation type selection
+        if deviation_type == "actual_vs_target":
+            # For actual_vs_target: show actual_value, target_value, then plan_value
+            columns.extend([
+                {
+                    "db_column_name": "actual_value",
+                    "display_name": "Actual Received Qty",
+                    "type": "decimal",
+                    "group_name": "Actual",
+                    "is_visible": True,
+                    "is_editable": False
+                },
+                {
+                    "db_column_name": "target_value",
+                    "display_name": "Target Value",
+                    "type": "decimal",
+                    "group_name": "Target",
+                    "is_visible": True,
+                    "is_editable": False
+                },
+                {
+                    "db_column_name": "plan_value",
+                    "display_name": "Planned Production",
+                    "type": "decimal",
+                    "group_name": "Planning",
+                    "is_visible": True,
+                    "is_editable": False
+                },
+                {
+                    "db_column_name": "deviation_pct",
+                    "display_name": "Deviation (%)",
+                    "type": "decimal",
+                    "group_name": "Analysis",
+                    "is_visible": True,
+                    "is_editable": False
+                }
+            ])
+        elif deviation_type == "plan_vs_target":
+            # For plan_vs_target: show plan_value, target_value, then actual_value
+            columns.extend([
+                {
+                    "db_column_name": "plan_value",
+                    "display_name": "Planned Production",
+                    "type": "decimal",
+                    "group_name": "Planning",
+                    "is_visible": True,
+                    "is_editable": False
+                },
+                {
+                    "db_column_name": "target_value",
+                    "display_name": "Target Value",
+                    "type": "decimal",
+                    "group_name": "Target",
+                    "is_visible": True,
+                    "is_editable": False
+                },
+                {
+                    "db_column_name": "actual_value",
+                    "display_name": "Actual Received Qty",
+                    "type": "decimal",
+                    "group_name": "Actual",
+                    "is_visible": True,
+                    "is_editable": False
+                },
+                {
+                    "db_column_name": "deviation_pct",
+                    "display_name": "Deviation (%)",
+                    "type": "decimal",
+                    "group_name": "Analysis",
+                    "is_visible": True,
+                    "is_editable": False
+                }
+            ])
+        else:  # actual_vs_plan
+            # For actual_vs_plan: show actual_value, plan_value, then target_value
+            columns.extend([
+                {
+                    "db_column_name": "actual_value",
+                    "display_name": "Actual Received Qty",
+                    "type": "decimal",
+                    "group_name": "Actual",
+                    "is_visible": True,
+                    "is_editable": False
+                },
+                {
+                    "db_column_name": "plan_value",
+                    "display_name": "Planned Production",
+                    "type": "decimal",
+                    "group_name": "Planning",
+                    "is_visible": True,
+                    "is_editable": False
+                },
+                {
+                    "db_column_name": "target_value",
+                    "display_name": "Target Value",
+                    "type": "decimal",
+                    "group_name": "Target",
+                    "is_visible": True,
+                    "is_editable": False
+                },
+                {
+                    "db_column_name": "deviation_pct",
+                    "display_name": "Deviation (%)",
+                    "type": "decimal",
+                    "group_name": "Analysis",
+                    "is_visible": True,
+                    "is_editable": False
+                }
+            ])
 
+        # Build metadata - only include actual values used in query, not hardcoded defaults
+        metadata = {
+            "total_records": len(processed_rows),
+            "limit_actuals_to_planned": limit_actuals_to_planned,
+            "filters_applied": {
+                "plan_revision_version": plan_revision_version if plan_revision_version else None,
+                "season": season if season else None,
+                "crop": crop if crop else None,
+                "state": state if state else None,
+                "variety": variety if variety else None,
+                "deviation_type": deviation_type
+            }
+        }
+        
         return {
-            "metadata": {
-                "season_used": selected_season,
-                "plan_version_used": selected_version,
-                "total_records": len(processed_rows),
-                "data_generated_at": "2025-09-09T16:06:00Z"
-            },
+            "metadata": metadata,
             "columns": columns,
             "data": processed_rows
         }
 
+    except HTTPException:
+        raise
     except psycopg2.Error as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=f"Error fetching state variety summary: {str(e)}")
+        if conn:
+            conn.rollback()
+        import traceback
+        error_detail = str(e) if str(e) else repr(e)
+        raise HTTPException(status_code=500, detail=f"Error fetching state variety summary: {error_detail}")
     finally:
         if 'cur' in locals():
             cur.close()
@@ -857,7 +1569,7 @@ def get_tp_filtered_options(
             # Step 1: Return all seasons
             cur.execute("""
                 SELECT DISTINCT season, season_id
-                FROM operations.season_crop_yield_view
+                FROM operations_demo.season_crop_yield_view
                 WHERE season IS NOT NULL AND season != ''
                 ORDER BY season DESC
             """)
@@ -868,7 +1580,7 @@ def get_tp_filtered_options(
             # Step 2: Return crops for given season
             cur.execute("""
                 SELECT DISTINCT crop, crop_id
-                FROM operations.season_crop_yield_view
+                FROM operations_demo.season_crop_yield_view
                 WHERE season_id = %s 
                 AND crop IS NOT NULL AND crop != ''
                 ORDER BY crop
@@ -880,7 +1592,7 @@ def get_tp_filtered_options(
             # Step 3: Return states for season + crop (removed "All States")
             cur.execute("""
                 SELECT DISTINCT state
-                FROM operations.season_crop_yield_view
+                FROM operations_demo.season_crop_yield_view
                 WHERE season_id = %s AND crop_id = %s
                 AND state IS NOT NULL AND state != ''
                 ORDER BY state
@@ -893,7 +1605,7 @@ def get_tp_filtered_options(
             # Step 4: Return varieties for season + crop + state
             cur.execute("""
                 SELECT DISTINCT variety_id, variety
-                FROM operations.season_crop_yield_view
+                FROM operations_demo.season_crop_yield_view
                 WHERE season_id = %s AND crop_id = %s AND state = %s
                 AND variety IS NOT NULL AND variety != ''
                 AND variety_id IS NOT NULL
@@ -1004,7 +1716,7 @@ def get_tp_aging_metrics(
                         THEN ROUND((SUM(COALESCE(packed_qt, 0)) / SUM(COALESCE(net_acres, 0)))::numeric, 2)
                         ELSE 0.00 
                     END as productivity
-                FROM operations.season_crop_yield_view
+                FROM operations_demo.season_crop_yield_view
                 WHERE {condition_str}
                 GROUP BY 
                     state, village, variety_id, variety, season, crop,
@@ -1047,7 +1759,7 @@ def get_tp_aging_metrics(
                         THEN ROUND((SUM(COALESCE(packed_qt, 0)) / SUM(COALESCE(net_acres, 0)))::numeric, 2)
                         ELSE 0.00 
                     END as productivity
-                FROM operations.season_crop_yield_view
+                FROM operations_demo.season_crop_yield_view
                 WHERE {condition_str}
                 GROUP BY 
                     variety_id, variety, season, crop,
@@ -1163,7 +1875,7 @@ def get_tp_aging_metrics(
         # Get total count for pagination
         count_query = f"""
             SELECT COUNT(DISTINCT variety_id) as total
-            FROM operations.season_crop_yield_view
+            FROM operations_demo.season_crop_yield_view
             WHERE {condition_str}
         """
         cur.execute(count_query, params[:-2])  # Remove limit and offset
@@ -1241,7 +1953,7 @@ def get_tp_aging_summary(
                     THEN ROUND((SUM(COALESCE(packed_qt, 0)) / SUM(COALESCE(net_acres, 0)))::numeric, 0)
                     ELSE 0 
                 END as overall_productivity
-            FROM operations.season_crop_yield_view
+            FROM operations_demo.season_crop_yield_view
             WHERE {condition_str}
               AND female_soaking_date IS NOT NULL
               AND female_tp_date IS NOT NULL

@@ -4,12 +4,15 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import create_engine
+from urllib.parse import quote_plus
 
+password = quote_plus("Prstilabdb1@")
 
 
 Base = declarative_base()
-engine = create_engine("postgresql://apps:PAI_Uat1_Apps@prstiai-client-dev-db-instance.cl6gqami6ntb.ap-south-1.rds.amazonaws.com:5432/SeedWorksDB")
-
+engine = create_engine(
+    f"postgresql://madanm:{password}@127.0.0.1:5432/test_seedworks_db"
+)
 
 class CategoryRecord(Base):
     __tablename__ = "categories"
@@ -94,6 +97,8 @@ class LocationRecord(Base):
     district = Column(String(100))
     district_id = Column(Integer)
     state = Column(String(100))
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
     category_id = Column(Integer, ForeignKey("operations.categories.category_id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -101,6 +106,29 @@ class LocationRecord(Base):
     # Relationships
     category = relationship("CategoryRecord", back_populates="locations")
     inspections = relationship("SeasonCropInspectionBase", back_populates="location")
+    polygon = relationship("LocationPolygonRecord", back_populates="location", uselist=False)
+
+
+class LocationPolygonRecord(Base):
+    __tablename__ = "location_polygons"
+    __table_args__ = {'schema': 'operations'}
+
+    location_id = Column(String(20), ForeignKey("operations.locations.location_id", ondelete="CASCADE"), 
+                         primary_key=True, nullable=False, index=True)
+    village = Column(String(100), nullable=False)
+    mandal = Column(String(100))
+    district = Column(String(100), nullable=False)
+    state = Column(String(100))
+    # Note: polygon_geom is stored as PostGIS geometry type
+    # For SQLAlchemy, we'll use Text to store GeoJSON, or use geoalchemy2 if available
+    # In practice, geometry operations should be done via raw SQL with PostGIS functions
+    polygon_geom = Column(Text, nullable=False)  # Stores GeoJSON string, converted to PostGIS geometry via SQL
+    source = Column(String(50), nullable=False, default='bhuvan')
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # Relationships
+    location = relationship("LocationRecord", back_populates="polygon")
 
 
 class GrowerRecord(Base):
@@ -462,6 +490,7 @@ class YieldInspectionView(Base):
     variety_id = Column(String, primary_key=True)
     variety_name = Column(String)
     village = Column(String)
+    state = Column(String)
     grower_name = Column(String)
     lot_id = Column(String)
     grower_id = Column(String)
@@ -479,6 +508,12 @@ class SeasonRecord(Base):
 
     season_id = Column(String, primary_key=True)
     season_name = Column(String)
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
+    description = Column(String, nullable=True)
+    is_default = Column(Boolean, nullable=True)
+    status = Column(Boolean, nullable=True)
+    create_date = Column(DateTime, nullable=True)
 
 class SeedForecast(Base):
     __tablename__ = "seed_forecast"
@@ -507,4 +542,4 @@ class SeedForecast(Base):
 # GrowerRecord.__table__.create(bind=engine, checkfirst=True)
 # OrganizerRecord.__table__.create(bind=engine, checkfirst=True)
 # SeasonCropInspectionBase.__table__.create(bind=engine, checkfirst=True)
-YieldRecord.__table__.create(bind=engine, checkfirst=True)
+# YieldRecord.__table__.create(bind=engine, checkfirst=True)

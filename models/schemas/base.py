@@ -1,3 +1,4 @@
+import math
 from pydantic import BaseModel, validator, Field, field_validator
 from sqlalchemy import Column, String, Float, Integer, DateTime, ForeignKey, Index
 from datetime import datetime, date
@@ -70,6 +71,111 @@ class LocationRecordCreate(BaseModel):
     district_id: Optional[str] = Field(None, max_length=20, description="District ID")
     state: Optional[str] = Field(None, max_length=100, description="State name")
     category_id: int = Field(..., description="Associated category ID")
+
+
+class LocationUpdateRequest(BaseModel):
+    village: Optional[str] = Field(None, max_length=100, description="Village name")
+    mandal: Optional[str] = Field(None, max_length=100, description="Mandal name")
+    district: Optional[str] = Field(None, max_length=100, description="District name")
+    state: Optional[str] = Field(None, max_length=100, description="State name")
+    latitude: Optional[float] = Field(None, description="Latitude coordinate")
+    longitude: Optional[float] = Field(None, description="Longitude coordinate")
+
+
+class LocationResponse(BaseSchema):
+    location_id: str
+    source_location_id: Optional[str]
+    village: str
+    mandal: Optional[str]
+    mandal_id: Optional[int]
+    district: Optional[str]
+    district_id: Optional[int]
+    state: Optional[str]
+    latitude: Optional[float]
+    longitude: Optional[float]
+    category_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator('mandal_id', 'district_id', mode='before')
+    @classmethod
+    def convert_empty_to_none(cls, v):
+        """Convert empty strings to None for integer fields"""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            # Handle empty strings or whitespace-only strings
+            if not v.strip():
+                return None
+            try:
+                return int(v.strip())
+            except (ValueError, TypeError):
+                return None
+        # If it's already an integer, return as-is
+        if isinstance(v, int):
+            return v
+        # Try to convert other types
+        try:
+            return int(v) if v else None
+        except (ValueError, TypeError):
+            return None
+
+    @field_validator('latitude', 'longitude', mode='before')
+    @classmethod
+    def validate_float_values(cls, v):
+        """Validate and sanitize float values, converting invalid floats (inf, -inf, nan) to None"""
+        if v is None:
+            return None
+        try:
+            float_val = float(v)
+            # Check for invalid float values that can't be JSON serialized
+            if math.isnan(float_val) or math.isinf(float_val):
+                return None
+            return float_val
+        except (ValueError, TypeError):
+            return None
+
+
+class LocationUpdateResponse(BaseModel):
+    message: str
+    location: LocationResponse
+    columns: Optional[List[Dict[str, Any]]] = None
+
+
+class LocationListResponse(BaseModel):
+    data: List[LocationResponse]
+    columns: Optional[List[Dict[str, Any]]] = None
+
+
+class LocationSummaryResponse(BaseSchema):
+    """Simplified location response with only essential display fields"""
+    location_id: str
+    village: str
+    mandal: Optional[str]
+    district: Optional[str]
+    state: Optional[str]
+    latitude: Optional[float]
+    longitude: Optional[float]
+
+    @field_validator('latitude', 'longitude', mode='before')
+    @classmethod
+    def validate_float_values(cls, v):
+        """Validate and sanitize float values, converting invalid floats (inf, -inf, nan) to None"""
+        if v is None:
+            return None
+        try:
+            float_val = float(v)
+            # Check for invalid float values that can't be JSON serialized
+            if math.isnan(float_val) or math.isinf(float_val):
+                return None
+            return float_val
+        except (ValueError, TypeError):
+            return None
+
+
+class LocationSummaryListResponse(BaseModel):
+    data: List[LocationSummaryResponse]
+    columns: Optional[List[Dict[str, Any]]] = None
 
 class SupplyChainPlanningResponse(BaseModel):
     id: Optional[int] = None
@@ -426,6 +532,7 @@ class YieldSummaryResponse(BaseModel):
     variety_name: Optional[str]
     village: Optional[str] = None
     grower_name: Optional[str] = None
+    state: Optional[str] = None
     total_received_qty: float
     total_packed_qty: float
     avg_productivity: Optional[float]

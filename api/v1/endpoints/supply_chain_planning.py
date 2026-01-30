@@ -355,78 +355,156 @@ def get_supply_chain_planning_detailed(
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
         # Validate hierarchical filtering requirements
-        # Allow plan_revision_version to be selected first, then season
-        if not plan_revision_version:
+        # plan_revision_version is the first optional filter, then season
+        # If plan_revision_version is provided, season becomes optional
+        # If plan_revision_version is not provided, season is required as the first filter
+        
+        if not plan_revision_version and not season:
             raise HTTPException(
                 status_code=400,
-                detail="plan_revision_version is required as the first filter parameter"
+                detail="plan_revision_version or season is required as the first filter parameter"
             )
         
-        if season and not plan_revision_version:
+        # If crop is provided, we need either plan_revision_version or season
+        if crop and not plan_revision_version and not season:
             raise HTTPException(
                 status_code=400,
-                detail="plan_revision_version is required before season"
-            )
-        
-        if crop and (not plan_revision_version or not season):
-            raise HTTPException(
-                status_code=400,
-                detail="plan_revision_version and season are required before crop"
+                detail="plan_revision_version or season is required before crop"
             )
             
-        if state and (not plan_revision_version or not season or not crop):
-            raise HTTPException(
-                status_code=400,
-                detail="plan_revision_version, season, and crop are required before state"
-            )
+        # Allow "All" to be passed for state without requiring crop
+        if state and state != "All":
+            if not plan_revision_version and not season:
+                raise HTTPException(
+                    status_code=400,
+                    detail="plan_revision_version or season is required before state"
+                )
+            if not crop:
+                raise HTTPException(
+                    status_code=400,
+                    detail="crop is required before state"
+                )
             
-        if variety and (not plan_revision_version or not season or not crop or not state):
-            raise HTTPException(
-                status_code=400,
-                detail="plan_revision_version, season, crop, and state are required before variety"
-            )
+        if variety and variety != "All" and ((not plan_revision_version and not season) or not crop):
+            if not plan_revision_version and not season:
+                raise HTTPException(
+                    status_code=400,
+                    detail="plan_revision_version or season is required before variety"
+                )
+            if not crop:
+                raise HTTPException(
+                    status_code=400,
+                    detail="crop is required before variety"
+                )
             
-        if village and (not plan_revision_version or not season or not crop or not state or not variety):
+        if village and ((not plan_revision_version and not season) or not crop or not state or not variety):
+            missing = []
+            if not plan_revision_version and not season:
+                missing.append("plan_revision_version or season")
+            if not crop:
+                missing.append("crop")
+            if not state:
+                missing.append("state")
+            if not variety:
+                missing.append("variety")
             raise HTTPException(
                 status_code=400,
-                detail="plan_revision_version, season, crop, state, and variety are required before village"
+                detail=f"{', '.join(missing)} are required before village"
             )
 
+        # Normalize state and variety for case-insensitive comparison
+        state_normalized = str(state).strip().lower() if state else ""
+        variety_normalized = str(variety).strip().lower() if variety else ""
+
         # Validate that the provided parameters exist in the database
+        # Build base query conditions
+        base_conditions = []
+        base_params = []
+        
+        if plan_revision_version:
+            base_conditions.append("plan_revision_version = %s")
+            base_params.append(plan_revision_version)
+        
         if season:
-            cur.execute("SELECT DISTINCT season FROM operations.supply_chain_vs_yield_view WHERE plan_revision_version = %s AND season = %s", (plan_revision_version, season))
-            if not cur.fetchone():
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid season '{season}' for plan_revision_version '{plan_revision_version}'. Please check available seasons."
-                )
+            base_conditions.append("season = %s")
+            base_params.append(season)
         
         if crop:
-            cur.execute("SELECT DISTINCT crop FROM operations.supply_chain_vs_yield_view WHERE plan_revision_version = %s AND season = %s AND crop = %s", (plan_revision_version, season, crop))
+            base_conditions.append("crop = %s")
+            base_params.append(crop)
+        
+        where_clause = " AND ".join(base_conditions) if base_conditions else "1=1"
+        
+        # Validate season
+        if season:
+            season_query = f"SELECT DISTINCT season FROM operations.supply_chain_vs_yield_view WHERE {where_clause}"
+            cur.execute(season_query, tuple(base_params))
             if not cur.fetchone():
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid crop '{crop}' for season '{season}' and plan_revision_version '{plan_revision_version}'. Please check available crops."
+                    detail=f"Invalid season '{season}'. Please check available seasons."
                 )
         
-        if state:
-            cur.execute("SELECT DISTINCT state FROM operations.supply_chain_vs_yield_view WHERE plan_revision_version = %s AND season = %s AND crop = %s AND state = %s", (plan_revision_version, season, crop, state))
+        # Validate crop
+        if crop:
+            crop_query = f"SELECT DISTINCT crop FROM operations.supply_chain_vs_yield_view WHERE {where_clause}"
+            cur.execute(crop_query, tuple(base_params))
+            if not cur.fetchone():
+                filter_info = f"plan_revision_version '{plan_revision_version}'" if plan_revision_version else f"season '{season}'"
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid crop '{crop}' for {filter_info}. Please check available crops."
+                )
+        
+        # Validate state only if it's not "All" (case-insensitive)
+        if state and state_normalized != "all":
+            state_query = f"SELECT DISTINCT state FROM operations.supply_chain_vs_yield_view WHERE {where_clause} AND state = %s"
+            state_params = list(base_params) + [state]
+            cur.execute(state_query, tuple(state_params))
+            if not cur.fetchone():
+                filter_info = f"plan_revision_version '{plan_revision_version}'" if plan_revision_version else f"season '{season}'"
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid state '{state}' for {filter_info} and crop '{crop}'. Please check available states."
+                )
+        
+        # Validate variety only if it's not "All" (case-insensitive)
+        if variety and variety_normalized != "all":
+            # If state is "All", validate variety across all states
+            if state_normalized == "all":
+                variety_query = f"SELECT DISTINCT variety FROM operations.supply_chain_vs_yield_view WHERE {where_clause} AND variety = %s"
+                variety_params = list(base_params) + [variety]
+            else:
+                variety_query = f"SELECT DISTINCT variety FROM operations.supply_chain_vs_yield_view WHERE {where_clause} AND state = %s AND variety = %s"
+                variety_params = list(base_params) + [state, variety]
+            
+            cur.execute(variety_query, tuple(variety_params))
             if not cur.fetchone():
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid state '{state}' for season '{season}', crop '{crop}', and plan_revision_version '{plan_revision_version}'. Please check available states."
+                    detail=f"Invalid variety '{variety}' for the given filters. Please check available varieties."
                 )
         
-        if variety:
-            cur.execute("SELECT DISTINCT variety FROM operations.supply_chain_vs_yield_view WHERE plan_revision_version = %s AND season = %s AND crop = %s AND state = %s AND variety = %s", (plan_revision_version, season, crop, state, variety))
-            if not cur.fetchone():
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid variety '{variety}' for season '{season}', crop '{crop}', state '{state}', and plan_revision_version '{plan_revision_version}'. Please check available varieties."
-                )
-        
+        # Validate village - handle "All" for state and variety
         if village:
-            cur.execute("SELECT DISTINCT village FROM operations.supply_chain_vs_yield_view WHERE plan_revision_version = %s AND season = %s AND crop = %s AND state = %s AND variety = %s AND village = %s", (plan_revision_version, season, crop, state, variety, village))
+            # Build village validation query based on state/variety filters
+            village_query = f"SELECT DISTINCT village FROM operations.supply_chain_vs_yield_view WHERE {where_clause}"
+            village_params = list(base_params)
+            
+            # Only add state filter if it's not "All"
+            if state and state_normalized != "all":
+                village_query += " AND state = %s"
+                village_params.append(state)
+            
+            # Only add variety filter if it's not "All"
+            if variety and variety_normalized != "all":
+                village_query += " AND variety = %s"
+                village_params.append(variety)
+            
+            village_query += " AND village = %s"
+            village_params.append(village)
+            
+            cur.execute(village_query, tuple(village_params))
             if not cur.fetchone():
                 raise HTTPException(
                     status_code=400,
@@ -525,202 +603,189 @@ def get_supply_chain_planning_detailed(
             columns = default_columns
             visible_columns = [col["db_column_name"] for col in default_columns if col["is_visible"]]
 
-        # If group_by_village is false, always use individual records query
-        if not group_by_village:
-            base_query = """
-            SELECT  
-                plan_revision_version,
-                season,
-                crop,
-                variety,
-                village,
-                state,
-                COALESCE(NULLIF(grower, ''), 'Not Assigned') as grower,
-                COALESCE(net_acres_current, 0.0) as net_acres_current,
-                COALESCE(productivity, 0.0) as productivity,
-                COALESCE(production_allocation, 0.0) as production_allocation,
-                COALESCE(actual_net_acres, 0.0) as actual_net_acres,
-                COALESCE(adjusted_production_allocation, 0.0) as adjusted_production_allocation,
-                COALESCE(estimated_cost_per_kg, 0.0) as estimated_cost_per_kg,
-                COALESCE(estimated_production_cost, 0.0) as estimated_production_cost,
-                COALESCE(actual_received_qty, 0.0) as actual_received_qty,
-                COALESCE(actual_packaged_qty, 0.0) as actual_packaged_qty,
-                COALESCE(actual_productivity, 0.0) as actual_productivity,
-                COALESCE(actual_amount, 0.0) as actual_amount,
-                longitude,
-                latitude,
-                1 as record_count
-            FROM operations.supply_chain_vs_yield_view
-            WHERE 1=1
-            """
-        elif not season:
-            # Level 0: Show seasons for the plan_revision_version - individual records
-            base_query = """
-            SELECT  
-                plan_revision_version,
-                season,
-                crop,
-                variety,
-                village,
-                state,
-                COALESCE(NULLIF(grower, ''), 'Not Assigned') as grower,
-                COALESCE(net_acres_current, 0.0) as net_acres_current,
-                COALESCE(productivity, 0.0) as productivity,
-                COALESCE(production_allocation, 0.0) as production_allocation,
-                COALESCE(actual_net_acres, 0.0) as actual_net_acres,
-                COALESCE(adjusted_production_allocation, 0.0) as adjusted_production_allocation,
-                COALESCE(estimated_cost_per_kg, 0.0) as estimated_cost_per_kg,
-                COALESCE(estimated_production_cost, 0.0) as estimated_production_cost,
-                COALESCE(actual_received_qty, 0.0) as actual_received_qty,
-                COALESCE(actual_packaged_qty, 0.0) as actual_packaged_qty,
-                COALESCE(actual_productivity, 0.0) as actual_productivity,
-                COALESCE(actual_amount, 0.0) as actual_amount,
-                longitude,
-                latitude,
-                1 as record_count
-            FROM operations.supply_chain_vs_yield_view
-            WHERE 1=1
-            """
-        elif not crop:
-            # Level 1: Show crops for the season - individual records
-            base_query = """
-            SELECT  
-                plan_revision_version,
-                season,
-                crop,
-                variety,
-                village,
-                state,
-                COALESCE(NULLIF(grower, ''), 'Not Assigned') as grower,
-                COALESCE(net_acres_current, 0.0) as net_acres_current,
-                COALESCE(productivity, 0.0) as productivity,
-                COALESCE(production_allocation, 0.0) as production_allocation,
-                COALESCE(actual_net_acres, 0.0) as actual_net_acres,
-                COALESCE(adjusted_production_allocation, 0.0) as adjusted_production_allocation,
-                COALESCE(estimated_cost_per_kg, 0.0) as estimated_cost_per_kg,
-                COALESCE(estimated_production_cost, 0.0) as estimated_production_cost,
-                COALESCE(actual_received_qty, 0.0) as actual_received_qty,
-                COALESCE(actual_packaged_qty, 0.0) as actual_packaged_qty,
-                COALESCE(actual_productivity, 0.0) as actual_productivity,
-                COALESCE(actual_amount, 0.0) as actual_amount,
-                longitude,
-                latitude,
-                1 as record_count
-            FROM operations.supply_chain_vs_yield_view
-            WHERE 1=1
-            """
-        elif not state:
-            # Level 2: Show states for the season and crop - individual records
-            base_query = """
-            SELECT  
-                plan_revision_version,
-                season,
-                crop,
-                variety,
-                village,
-                state,
-                COALESCE(NULLIF(grower, ''), 'Not Assigned') as grower,
-                COALESCE(net_acres_current, 0.0) as net_acres_current,
-                COALESCE(productivity, 0.0) as productivity,
-                COALESCE(production_allocation, 0.0) as production_allocation,
-                COALESCE(actual_net_acres, 0.0) as actual_net_acres,
-                COALESCE(adjusted_production_allocation, 0.0) as adjusted_production_allocation,
-                COALESCE(estimated_cost_per_kg, 0.0) as estimated_cost_per_kg,
-                COALESCE(estimated_production_cost, 0.0) as estimated_production_cost,
-                COALESCE(actual_received_qty, 0.0) as actual_received_qty,
-                COALESCE(actual_packaged_qty, 0.0) as actual_packaged_qty,
-                COALESCE(actual_productivity, 0.0) as actual_productivity,
-                COALESCE(actual_amount, 0.0) as actual_amount,
-                longitude,
-                latitude,
-                1 as record_count
-            FROM operations.supply_chain_vs_yield_view
-            WHERE 1=1
-            """
-        elif not variety:
-            # Level 3: Show varieties for the season, crop, and state - individual records
-            base_query = """
-            SELECT  
-                plan_revision_version,
-                season,
-                crop,
-                variety,
-                village,
-                state,
-                COALESCE(NULLIF(grower, ''), 'Not Assigned') as grower,
-                COALESCE(net_acres_current, 0.0) as net_acres_current,
-                COALESCE(productivity, 0.0) as productivity,
-                COALESCE(production_allocation, 0.0) as production_allocation,
-                COALESCE(actual_net_acres, 0.0) as actual_net_acres,
-                COALESCE(adjusted_production_allocation, 0.0) as adjusted_production_allocation,
-                COALESCE(estimated_cost_per_kg, 0.0) as estimated_cost_per_kg,
-                COALESCE(estimated_production_cost, 0.0) as estimated_production_cost,
-                COALESCE(actual_received_qty, 0.0) as actual_received_qty,
-                COALESCE(actual_packaged_qty, 0.0) as actual_packaged_qty,
-                COALESCE(actual_productivity, 0.0) as actual_productivity,
-                COALESCE(actual_amount, 0.0) as actual_amount,
-                longitude,
-                latitude,
-                1 as record_count
-            FROM operations.supply_chain_vs_yield_view
-            WHERE 1=1
-            """
-        elif not village:
-            # Level 4: Show villages for the season, crop, state, and variety - individual records
-            base_query = """
-            SELECT  
-                plan_revision_version,
-                season,
-                crop,
-                variety,
-                village,
-                state,
-                COALESCE(NULLIF(grower, ''), 'Not Assigned') as grower,
-                COALESCE(net_acres_current, 0.0) as net_acres_current,
-                COALESCE(productivity, 0.0) as productivity,
-                COALESCE(production_allocation, 0.0) as production_allocation,
-                COALESCE(actual_net_acres, 0.0) as actual_net_acres,
-                COALESCE(adjusted_production_allocation, 0.0) as adjusted_production_allocation,
-                COALESCE(estimated_cost_per_kg, 0.0) as estimated_cost_per_kg,
-                COALESCE(estimated_production_cost, 0.0) as estimated_production_cost,
-                COALESCE(actual_received_qty, 0.0) as actual_received_qty,
-                COALESCE(actual_packaged_qty, 0.0) as actual_packaged_qty,
-                COALESCE(actual_productivity, 0.0) as actual_productivity,
-                COALESCE(actual_amount, 0.0) as actual_amount,
-                longitude,
-                latitude,
-                1 as record_count
-            FROM operations.supply_chain_vs_yield_view
-            WHERE 1=1
-            """
+        # Determine rollup level and build dynamic query with aggregation
+        # Hierarchy: plan_revision_version (optional) → Season → Crop → State → Variety → Village
+        
+        # Base group by fields - always include season in results (even if not filtered)
+        group_by_fields = []
+        select_fields = []
+        
+        # Track what additional fields we're selecting
+        include_season = False
+        include_crop = False
+        include_state = False
+        include_variety = False
+        include_village = False
+        include_grower = False
+        
+        # Season is always included in results (to show all seasons when plan_revision_version is selected)
+        select_fields.append("season")
+        group_by_fields.append("season")
+        include_season = True
+        
+        # Normalize state and variety for case-insensitive comparison
+        state_normalized = str(state).strip().lower() if state else ""
+        variety_normalized = str(variety).strip().lower() if variety else ""
+        
+        # Level 1: When season is selected, show crops (grouped)
+        if not crop:
+            # Show all available crops for the selected season
+            select_fields.append("crop")
+            group_by_fields.append("crop")
+            include_crop = True
+            # Don't include state, variety, or village when showing crops
+            include_state = False
+            include_variety = False
+            include_village = False
+            include_grower = False
         else:
-            # Level 5: Show growers for all filters - individual records
-            base_query = """
+            # Crop is selected, add to group by
+            select_fields.append("crop")
+            group_by_fields.append("crop")
+            include_crop = True
+            
+            # Level 2: After selecting a crop, show states (grouped)
+            if not state or state_normalized == "":
+                # Show all available states for the selected crop
+                select_fields.append("state")
+                group_by_fields.append("state")
+                include_state = True
+                # Don't include variety or village when showing states
+                include_variety = False
+                include_village = False
+                include_grower = False
+            else:
+                # State is selected, add to group by
+                select_fields.append("state")
+                group_by_fields.append("state")
+                include_state = True
+                
+                # Level 3: State selection logic
+                if state_normalized == "all":
+                    # When state = "All", show all states + all varieties (grouped)
+                    # State is already included, now include variety
+                    select_fields.append("variety")
+                    group_by_fields.append("variety")
+                    include_variety = True
+                    
+                    # Check if variety is selected
+                    if variety and variety_normalized != "all":
+                        # Specific variety selected - include villages
+                        if village and village.strip() and village.strip().upper() != "ALL":
+                            # Specific village selected - include it with grower
+                            select_fields.append("village")
+                            select_fields.append("COALESCE(NULLIF(grower, ''), 'Not Assigned') as grower")
+                            group_by_fields.append("village")
+                            group_by_fields.append("grower")
+                            include_village = True
+                            include_grower = True
+                        else:
+                            # Village not selected or "All" - show all villages grouped
+                            select_fields.append("village")
+                            group_by_fields.append("village")
+                            include_village = True
+                            include_grower = False
+                    else:
+                        # Variety not selected or "All" - show all varieties grouped, no villages
+                        include_village = False
+                        include_grower = False
+                else:
+                    # Specific state selected - show only varieties available under that state (grouped)
+                    if not variety or variety_normalized == "":
+                        # Show all varieties for the selected state
+                        select_fields.append("variety")
+                        group_by_fields.append("variety")
+                        include_variety = True
+                        # Don't include village when showing varieties
+                        include_village = False
+                        include_grower = False
+                    else:
+                        # Variety is selected
+                        if variety_normalized == "all":
+                            # When variety = "All", show all varieties + all villages (grouped)
+                            select_fields.append("variety")
+                            group_by_fields.append("variety")
+                            include_variety = True
+                            
+                            # Include villages when variety is "All"
+                            if village and village.strip() and village.strip().upper() != "ALL":
+                                # Specific village selected - include it with grower
+                                select_fields.append("village")
+                                select_fields.append("COALESCE(NULLIF(grower, ''), 'Not Assigned') as grower")
+                                group_by_fields.append("village")
+                                group_by_fields.append("grower")
+                                include_village = True
+                                include_grower = True
+                            else:
+                                # Village not selected or "All" - show all villages grouped
+                                select_fields.append("village")
+                                group_by_fields.append("village")
+                                include_village = True
+                                include_grower = False
+                        else:
+                            # Specific variety selected - show only villages under that variety (grouped)
+                            select_fields.append("variety")
+                            group_by_fields.append("variety")
+                            include_variety = True
+                            
+                            if village and village.strip() and village.strip().upper() != "ALL":
+                                # Specific village selected - include it with grower
+                                select_fields.append("village")
+                                select_fields.append("COALESCE(NULLIF(grower, ''), 'Not Assigned') as grower")
+                                group_by_fields.append("village")
+                                group_by_fields.append("grower")
+                                include_village = True
+                                include_grower = True
+                            else:
+                                # Village not selected or "All" - show all villages for the variety
+                                select_fields.append("village")
+                                group_by_fields.append("village")
+                                include_village = True
+                                include_grower = False
+        
+        # Add plan_revision_version to select if provided (optional filter)
+        if plan_revision_version:
+            select_fields.insert(0, "plan_revision_version")
+            group_by_fields.insert(0, "plan_revision_version")
+        
+        # Build SELECT with aggregations
+        select_clause = ", ".join(select_fields)
+        
+        # Add aggregated numeric fields
+        aggregated_fields = """
+            SUM(COALESCE(net_acres_current, 0.0)) as net_acres_current,
+            AVG(COALESCE(productivity, 0.0)) as productivity,
+            SUM(COALESCE(production_allocation, 0.0)) as production_allocation,
+            SUM(COALESCE(actual_net_acres, 0.0)) as actual_net_acres,
+            SUM(COALESCE(adjusted_production_allocation, 0.0)) as adjusted_production_allocation,
+            AVG(COALESCE(estimated_cost_per_kg, 0.0)) as estimated_cost_per_kg,
+            SUM(COALESCE(estimated_production_cost, 0.0)) as estimated_production_cost,
+            SUM(COALESCE(actual_received_qty, 0.0)) as actual_received_qty,
+            SUM(COALESCE(actual_packaged_qty, 0.0)) as actual_packaged_qty,
+            AVG(COALESCE(actual_productivity, 0.0)) as actual_productivity,
+            SUM(COALESCE(actual_amount, 0.0)) as actual_amount,
+            COUNT(*) as record_count,
+            AVG(longitude) as longitude,
+            AVG(latitude) as latitude
+        """
+        
+        # Build GROUP BY clause - handle grower field specially
+        group_by_parts = []
+        for field in group_by_fields:
+            if field == "grower" and include_grower:
+                # Use the same expression as in SELECT for grower
+                group_by_parts.append("COALESCE(NULLIF(grower, ''), 'Not Assigned')")
+            else:
+                group_by_parts.append(field)
+        group_by_clause = ", ".join(group_by_parts)
+        
+        base_query = f"""
             SELECT  
-                plan_revision_version,
-                season,
-                crop,
-                state,
-                variety,
-                village,
-                COALESCE(NULLIF(grower, ''), 'Not Assigned') as grower,
-                COALESCE(net_acres_current, 0.0) as net_acres_current,
-                COALESCE(productivity, 0.0) as productivity,
-                COALESCE(production_allocation, 0.0) as production_allocation,
-                COALESCE(actual_net_acres, 0.0) as actual_net_acres,
-                COALESCE(adjusted_production_allocation, 0.0) as adjusted_production_allocation,
-                COALESCE(estimated_cost_per_kg, 0.0) as estimated_cost_per_kg,
-                COALESCE(estimated_production_cost, 0.0) as estimated_production_cost,
-                COALESCE(actual_received_qty, 0.0) as actual_received_qty,
-                COALESCE(actual_packaged_qty, 0.0) as actual_packaged_qty,
-                COALESCE(actual_productivity, 0.0) as actual_productivity,
-                COALESCE(actual_amount, 0.0) as actual_amount,
-                longitude,
-                latitude,
-                1 as record_count
+                {select_clause},
+                {aggregated_fields}
             FROM operations.supply_chain_vs_yield_view
             WHERE 1=1
-            """
+        """
 
         conditions = []
         params = {}
@@ -734,12 +799,25 @@ def get_supply_chain_planning_detailed(
         if crop:
             conditions.append("crop = %(crop)s")
             params["crop"] = crop
-        if variety:
+        # Handle "All" selections for state and variety (case-insensitive)
+        state_normalized = str(state).strip().lower() if state else ""
+        variety_normalized = str(variety).strip().lower() if variety else ""
+        
+        if state and state_normalized != "all":
+            conditions.append("state = %(state)s")
+            params["state"] = state
+        if variety and variety_normalized != "all":
             conditions.append("variety ILIKE %(variety)s")
             params["variety"] = f"%{variety}%"
-        if village:
+        # Only filter by village if it's provided and not "ALL"
+        if village and village.strip() and village.strip().upper() != "ALL":
             conditions.append("village ILIKE %(village)s")
             params["village"] = f"%{village}%"
+        
+        # When villages are included in grouping, filter out NULL villages to show only valid village data
+        if include_village and not village:
+            # Only filter NULL villages if we're grouping by village but not filtering by a specific village
+            conditions.append("village IS NOT NULL AND village != '' AND TRIM(village) != ''")
         # NEW: Location hierarchy filters
         if mandal:
             conditions.append("mandal ILIKE %(mandal)s")
@@ -747,65 +825,133 @@ def get_supply_chain_planning_detailed(
         if district:
             conditions.append("district ILIKE %(district)s")
             params["district"] = f"%{district}%"
-        if state:
-            conditions.append("state = %(state)s")
-            params["state"] = state
-        if not include_empty_growers and not group_by_village:
+        if not include_empty_growers and include_grower:
             conditions.append("grower IS NOT NULL AND grower != ''")
 
         if conditions:
             base_query += " AND " + " AND ".join(conditions)
 
-        # All levels now use individual records - no GROUP BY needed
-            base_query += """
-        ORDER BY season, crop, state, variety, village, grower
-            LIMIT %(limit)s OFFSET %(offset)s
-            """
+        # Add GROUP BY clause
+        # Build ORDER BY - use alias for grower field
+        order_by_parts = []
+        for field in group_by_fields:
+            if field == "grower" and include_grower:
+                order_by_parts.append("grower")  # Use alias from SELECT
+            elif field != "grower" or not include_grower:
+                order_by_parts.append(field)
+        
+        # Ensure we have fields to group by
+        if not group_by_clause:
+            raise HTTPException(status_code=400, detail="No grouping fields specified. Please select at least one filter.")
+        
+        # Build ORDER BY clause - use same fields as GROUP BY
+        if order_by_parts:
+            order_by_clause = ", ".join(order_by_parts)
+        else:
+            order_by_clause = group_by_clause  # Fallback to GROUP BY fields if order_by_parts is empty
+        
+        base_query += f"""
+        GROUP BY {group_by_clause}
+        ORDER BY {order_by_clause}
+        LIMIT %(limit)s OFFSET %(offset)s
+        """
 
         params.update({"limit": limit, "offset": offset})
 
         cur.execute(base_query, params)
         rows = cur.fetchall()
 
-        # Process rows directly since coordinates are included in the main query
-
+        # Process aggregated rows
         processed_rows = []
         for row in rows:
             row_dict = dict(row)
 
-            # Handle grower field if it exists
-            if 'grower_display' in row_dict:
-                row_dict['grower'] = row_dict.pop('grower_display')
-
-            # All levels now return individual record columns with guaranteed field order
-            filtered_row = OrderedDict([
-                ('plan_revision_version', row_dict.get('plan_revision_version', '')),
-                ('season', row_dict.get('season', '')),
-                ('crop', row_dict.get('crop', '')),
-                ('state', row_dict.get('state', '')),
-                ('variety', row_dict.get('variety', '')),
-                ('village', row_dict.get('village', '')),
-                ('grower', row_dict.get('grower', 'Not Assigned')),
-                ('net_acres_current', safe_float_convert(row_dict.get('net_acres_current', 0.0))),
-                ('productivity', safe_float_convert(row_dict.get('productivity', 0.0))),
-                ('production_allocation', safe_float_convert(row_dict.get('production_allocation', 0.0))),
-                ('actual_net_acres', safe_float_convert(row_dict.get('actual_net_acres', 0.0))),
-                ('adjusted_production_allocation', safe_float_convert(row_dict.get('adjusted_production_allocation', 0.0))),
-                ('estimated_cost_per_kg', safe_float_convert(row_dict.get('estimated_cost_per_kg', 0.0))),
-                ('estimated_production_cost', safe_float_convert(row_dict.get('estimated_production_cost', 0.0))),
-                ('actual_received_qty', safe_float_convert(row_dict.get('actual_received_qty', 0.0))),
-                ('actual_packaged_qty', safe_float_convert(row_dict.get('actual_packaged_qty', 0.0))),
-                ('actual_productivity', safe_float_convert(row_dict.get('actual_productivity', 0.0))),
-                ('actual_amount', safe_float_convert(row_dict.get('actual_amount', 0.0))),
-                ('longitude', safe_float_convert(row_dict.get('longitude', 0.0))),
-                ('latitude', safe_float_convert(row_dict.get('latitude', 0.0))),
-                ('record_count', safe_float_convert(row_dict.get('record_count', 1.0)))
-            ])
+            # Build result dictionary with fields based on what was selected
+            filtered_row = OrderedDict()
+            
+            # Include plan_revision_version only if it was in the query
+            if plan_revision_version:
+                filtered_row['plan_revision_version'] = row_dict.get('plan_revision_version', '')
+            else:
+                filtered_row['plan_revision_version'] = None
+            
+            # Add fields based on what was included in the query
+            if include_season:
+                filtered_row['season'] = row_dict.get('season', '')
+            else:
+                filtered_row['season'] = None
+                
+            if include_crop:
+                filtered_row['crop'] = row_dict.get('crop', '')
+            else:
+                filtered_row['crop'] = None
+                
+            if include_state:
+                filtered_row['state'] = row_dict.get('state', '')
+            else:
+                filtered_row['state'] = None
+                
+            # Handle variety field based on filter logic
+            if include_variety:
+                filtered_row['variety'] = row_dict.get('variety', '')
+            else:
+                # Set variety to NULL when not included in grouping
+                filtered_row['variety'] = None
+                
+            # Handle village field based on filter logic
+            if include_village:
+                village_value = row_dict.get('village')
+                # Handle None, empty string, or whitespace-only values
+                if village_value is None or (isinstance(village_value, str) and village_value.strip() == ''):
+                    filtered_row['village'] = None
+                else:
+                    filtered_row['village'] = str(village_value).strip()
+            else:
+                # Set village to NULL when not included in grouping
+                filtered_row['village'] = None
+                
+            if include_grower:
+                filtered_row['grower'] = row_dict.get('grower', 'Not Assigned')
+            else:
+                filtered_row['grower'] = None
+            
+            # Add aggregated numeric fields - round all to 2 decimal places
+            filtered_row['net_acres_current'] = round(safe_float_convert(row_dict.get('net_acres_current', 0.0)), 2)
+            filtered_row['productivity'] = round(safe_float_convert(row_dict.get('productivity', 0.0)), 2)
+            filtered_row['production_allocation'] = round(safe_float_convert(row_dict.get('production_allocation', 0.0)), 2)
+            filtered_row['actual_net_acres'] = round(safe_float_convert(row_dict.get('actual_net_acres', 0.0)), 2)
+            filtered_row['adjusted_production_allocation'] = round(safe_float_convert(row_dict.get('adjusted_production_allocation', 0.0)), 2)
+            filtered_row['estimated_cost_per_kg'] = round(safe_float_convert(row_dict.get('estimated_cost_per_kg', 0.0)), 2)
+            filtered_row['estimated_production_cost'] = round(safe_float_convert(row_dict.get('estimated_production_cost', 0.0)), 2)
+            filtered_row['actual_received_qty'] = round(safe_float_convert(row_dict.get('actual_received_qty', 0.0)), 2)
+            filtered_row['actual_packaged_qty'] = round(safe_float_convert(row_dict.get('actual_packaged_qty', 0.0)), 2)
+            filtered_row['actual_productivity'] = round(safe_float_convert(row_dict.get('actual_productivity', 0.0)), 2)
+            filtered_row['actual_amount'] = round(safe_float_convert(row_dict.get('actual_amount', 0.0)), 2)
+            filtered_row['longitude'] = round(safe_float_convert(row_dict.get('longitude', 0.0)), 2)
+            filtered_row['latitude'] = round(safe_float_convert(row_dict.get('latitude', 0.0)), 2)
+            filtered_row['record_count'] = int(round(safe_float_convert(row_dict.get('record_count', 1.0)), 0))  # record_count should be integer
             
             processed_rows.append(filtered_row)
 
-        # All levels now use individual records - simple count
-            count_query = "SELECT COUNT(*) FROM operations.supply_chain_vs_yield_view WHERE 1=1"
+        # Count query: count the aggregated groups
+        # Filter out "grower" from count_group_by_fields if it's an expression
+        count_group_by_fields = []
+        for f in group_by_fields:
+            if f == "grower" and include_grower:
+                # Skip grower in count query as it's an expression
+                continue
+            elif "COALESCE" in str(f) or "as grower" in str(f):
+                # Skip expressions
+                continue
+            else:
+                count_group_by_fields.append(f)
+        
+        count_query = f"""
+        SELECT COUNT(*) FROM (
+            SELECT {", ".join(count_group_by_fields)}
+            FROM operations.supply_chain_vs_yield_view
+            WHERE 1=1
+        """
 
         count_conditions = []
         count_params = {}
@@ -814,35 +960,78 @@ def get_supply_chain_planning_detailed(
             count_conditions.append("plan_revision_version = %(version)s")
             count_params["version"] = plan_revision_version
         if season:
-            count_conditions.append("season ILIKE %(season)s")
-            count_params["season"] = f"%{season}%"
+            count_conditions.append("season = %(season)s")
+            count_params["season"] = season
         if crop:
-            count_conditions.append("crop ILIKE %(crop)s")
-            count_params["crop"] = f"%{crop}%"
-        if variety:
+            count_conditions.append("crop = %(crop)s")
+            count_params["crop"] = crop
+        # Handle "All" selections for state and variety in count query (case-insensitive)
+        state_normalized = str(state).strip().lower() if state else ""
+        variety_normalized = str(variety).strip().lower() if variety else ""
+        
+        if state and state_normalized != "all":
+            count_conditions.append("state = %(state)s")
+            count_params["state"] = state
+        if variety and variety_normalized != "all":
             count_conditions.append("variety ILIKE %(variety)s")
             count_params["variety"] = f"%{variety}%"
-        if village:
+        if village and village.strip() and village.strip().upper() != "ALL":
             count_conditions.append("village ILIKE %(village)s")
             count_params["village"] = f"%{village}%"
-        # NEW: Location hierarchy count filters
+        # Location hierarchy count filters
         if mandal:
             count_conditions.append("mandal ILIKE %(mandal)s")
             count_params["mandal"] = f"%{mandal}%"
         if district:
             count_conditions.append("district ILIKE %(district)s")
             count_params["district"] = f"%{district}%"
-        if state:
-            count_conditions.append("state ILIKE %(state)s")
-            count_params["state"] = f"%{state}%"
-        if not include_empty_growers and not group_by_village:
+        if not include_empty_growers and include_grower:
             count_conditions.append("grower IS NOT NULL AND grower != ''")
+        
+        # When villages are included in grouping, filter out NULL/empty villages in count query too
+        if include_village and not village:
+            count_conditions.append("village IS NOT NULL AND village != '' AND TRIM(village) != ''")
 
         if count_conditions:
             count_query += " AND " + " AND ".join(count_conditions)
 
+        count_query += f"""
+        GROUP BY {", ".join(count_group_by_fields)}
+        ) as grouped_results
+        """
+
         cur.execute(count_query, count_params)
         total_count = cur.fetchone()[0]
+
+        # Generate total row for all numeric/metric fields
+        total_row = OrderedDict()
+        
+        if processed_rows:
+            # Identify all numeric fields dynamically from the first row
+            numeric_fields = []
+            for key, value in processed_rows[0].items():
+                # Check if the field is numeric (int or float) and not None
+                if isinstance(value, (int, float)) and value is not None:
+                    # Skip non-metric fields that shouldn't be summed (like record_count, IDs, etc.)
+                    # Also skip fields that are averages (like productivity, estimated_cost_per_kg, actual_productivity)
+                    # These should be calculated as weighted averages or excluded from totals
+                    if key not in ['record_count']:
+                        numeric_fields.append(key)
+            
+            # Calculate totals for each numeric field
+            for field_name in numeric_fields:
+                # Sum all values for this field across all rows
+                total_value = sum(
+                    safe_float_convert(row.get(field_name, 0.0)) 
+                    for row in processed_rows 
+                    if row.get(field_name) is not None
+                )
+                # Round to 2 decimal places for consistency
+                total_row[f'total_{field_name}'] = round(total_value, 2)
+        
+        # Append total row to processed_rows if it has any totals
+        if total_row:
+            processed_rows.append(total_row)
 
         # Removed unnecessary village dropdown logic to optimize response
 
@@ -858,11 +1047,20 @@ def get_supply_chain_planning_detailed(
     except psycopg2.Error as e:
         if conn:
             conn.rollback()
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Database error: {str(e)}")
+        print(f"Traceback: {error_details}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     except Exception as e:
         if conn:
             conn.rollback()
-        raise HTTPException(status_code=500, detail=f"Error fetching supply chain planning data: {str(e)}")
+        import traceback
+        error_details = traceback.format_exc()
+        error_msg = str(e) if str(e) else repr(e)
+        print(f"Error fetching supply chain planning data: {error_msg}")
+        print(f"Traceback: {error_details}")
+        raise HTTPException(status_code=500, detail=f"Error fetching supply chain planning data: {error_msg}")
     finally:
         if 'cur' in locals():
             cur.close()

@@ -76,21 +76,42 @@ async def get_dropdown_options(
                 .distinct()
                 .all()
             )
-            result["variety_id"] = [{v.variety_id: v.variety_name} for v in variety_data]
+            # Add "ALL" as the first option
+            variety_list = [{v.variety_id: v.variety_name} for v in variety_data]
+            result["variety_id"] = [{"ALL": "ALL"}] + variety_list
 
         elif season_id and crop_id and variety_id:
             # Step 4: Return villages for season + crop + variety
-            village_data = (
-                db.query(SeasonCropInspectionBase.village)
-                .filter(
-                    SeasonCropInspectionBase.season_id == season_id,
-                    SeasonCropInspectionBase.crop_id == crop_id,
-                    SeasonCropInspectionBase.variety_id == variety_id
+            # Handle "ALL" for variety_id (case-insensitive)
+            variety_normalized = str(variety_id).strip().upper() if variety_id else ""
+            
+            if variety_normalized == "ALL":
+                # When variety = "ALL", get all villages for season + crop (no variety filter)
+                village_data = (
+                    db.query(SeasonCropInspectionBase.village)
+                    .filter(
+                        SeasonCropInspectionBase.season_id == season_id,
+                        SeasonCropInspectionBase.crop_id == crop_id
+                    )
+                    .distinct()
+                    .all()
                 )
-                .distinct()
-                .all()
-            )
-            result["village"] = [v.village for v in village_data if v.village]
+            else:
+                # When specific variety is selected, get villages for that variety
+                village_data = (
+                    db.query(SeasonCropInspectionBase.village)
+                    .filter(
+                        SeasonCropInspectionBase.season_id == season_id,
+                        SeasonCropInspectionBase.crop_id == crop_id,
+                        SeasonCropInspectionBase.variety_id == variety_id
+                    )
+                    .distinct()
+                    .all()
+                )
+            
+            # Add "ALL" as the first option, followed by actual villages
+            village_list = [v.village for v in village_data if v.village]
+            result["village"] = ["ALL"] + village_list
 
         else:
             raise HTTPException(status_code=400, detail="Invalid parameter combination.")
@@ -122,6 +143,18 @@ async def get_supply_chain_planning_dropdown_options(
             ORDER BY {column}
         """
 
+        # Alternative query format for better debugging
+        direct_query_template = """
+            SELECT DISTINCT {column}
+            FROM operations.supply_chain_vs_yield_view
+            WHERE plan_revision_version = %(version)s 
+            AND season = %(season)s 
+            AND crop = %(crop)s
+            {state_filter}
+            AND {column} IS NOT NULL AND {column} != ''
+            ORDER BY {column}
+        """
+
         if not plan_revision_version and not season and not crop and not state and not variety and not village:
             query = base_query.format(column="plan_revision_version", conditions="1=1")
             result["plan_revision_version"] = [r[0] for r in db.execute(text(query)).fetchall()]
@@ -142,36 +175,116 @@ async def get_supply_chain_planning_dropdown_options(
                 column="state",
                 conditions="plan_revision_version = :version AND season = :season AND crop = :crop"
             )
-            result["state"] = [r[0] for r in db.execute(text(query), {
+            state_list = [r[0] for r in db.execute(text(query), {
                 "version": plan_revision_version,
                 "season": season,
                 "crop": crop
             }).fetchall()]
+            # Add "All" as the first option
+            result["state"] = ["All"] + state_list
 
         elif plan_revision_version and season and crop and state and not variety:
-            query = base_query.format(
-                column="variety",
-                conditions="plan_revision_version = :version AND season = :season AND crop = :crop AND state = :state"
-            )
-            result["variety"] = [r[0] for r in db.execute(text(query), {
+            # Handle "All" state - get varieties for all states (case-insensitive check)
+            state_normalized = str(state).strip().lower() if state else ""
+            
+            if state_normalized == "all":
+                # When state is "All" (case-insensitive), get all varieties across all states (no state filter)
+                query = text("""
+                    SELECT DISTINCT variety
+                    FROM operations.supply_chain_vs_yield_view
+                    WHERE plan_revision_version = :version 
+                    AND season = :season 
+                    AND crop = :crop
+                    AND variety IS NOT NULL 
+                    AND variety != ''
+                    AND TRIM(variety) != ''
+                    ORDER BY variety
+                """)
+                try:
+                    rows = db.execute(query, {
+                        "version": plan_revision_version,
+                        "season": season,
+                        "crop": crop
+                    }).fetchall()
+                    variety_list = [str(r[0]).strip() for r in rows if r[0] and str(r[0]).strip()]
+                    # Remove duplicates while preserving order
+                    variety_list = list(dict.fromkeys(variety_list))
+                    # Filter out any empty strings
+                    variety_list = [v for v in variety_list if v]
+                except Exception as e:
+                    # Log error for debugging
+                    import logging
+                    logging.error(f"Error fetching varieties when state=All: {str(e)}")
+                    variety_list = []
+            else:
+                # When specific state is selected, get varieties for that state
+                query = text("""
+                    SELECT DISTINCT variety
+                    FROM operations.supply_chain_vs_yield_view
+                    WHERE plan_revision_version = :version 
+                    AND season = :season 
+                    AND crop = :crop
+                    AND state = :state
+                    AND variety IS NOT NULL 
+                    AND variety != ''
+                    AND TRIM(variety) != ''
+                    ORDER BY variety
+                """)
+                try:
+                    rows = db.execute(query, {
                 "version": plan_revision_version,
                 "season": season,
                 "crop": crop,
                 "state": state
-            }).fetchall()]
+                    }).fetchall()
+                    variety_list = [str(r[0]).strip() for r in rows if r[0] and str(r[0]).strip()]
+                    # Remove duplicates while preserving order
+                    variety_list = list(dict.fromkeys(variety_list))
+                    # Filter out any empty strings
+                    variety_list = [v for v in variety_list if v]
+                except Exception as e:
+                    import logging
+                    logging.error(f"Error fetching varieties for state {state}: {str(e)}")
+                    variety_list = []
+            
+            # Always add "All" as the first option in variety dropdown, followed by actual varieties
+            # Ensure we always return at least ["All"] even if no varieties found
+            if variety_list:
+                result["variety"] = ["All"] + variety_list
+            else:
+                # If no varieties found, still return ["All"] but log a warning
+                import logging
+                logging.warning(f"No varieties found for plan_revision_version={plan_revision_version}, season={season}, crop={crop}, state={state}")
+                result["variety"] = ["All"]
 
         elif plan_revision_version and season and crop and state and variety and not village:
-            query = base_query.format(
-                column="village",
-                conditions="plan_revision_version = :version AND season = :season AND crop = :crop AND state = :state AND variety = :variety"
-            )
-            result["village"] = [r[0] for r in db.execute(text(query), {
+            # Handle "All" selections for state and variety (case-insensitive)
+            state_normalized = str(state).strip().lower() if state else ""
+            variety_normalized = str(variety).strip().lower() if variety else ""
+            
+            conditions_parts = ["plan_revision_version = :version", "season = :season", "crop = :crop"]
+            params = {
                 "version": plan_revision_version,
                 "season": season,
-                "crop": crop,
-                "state": state,
-                "variety": variety
-            }).fetchall()]
+                "crop": crop
+            }
+            
+            # Only add state filter if it's not "All" (case-insensitive)
+            if state_normalized != "all":
+                conditions_parts.append("state = :state")
+                params["state"] = state
+            
+            # Only add variety filter if it's not "All" (case-insensitive)
+            if variety_normalized != "all":
+                conditions_parts.append("variety = :variety")
+                params["variety"] = variety
+            
+            conditions_str = " AND ".join(conditions_parts)
+            query = base_query.format(
+                column="village",
+                conditions=conditions_str
+            )
+            result["village"] = [r[0] for r in db.execute(text(query), params).fetchall()]
 
         else:
             raise HTTPException(status_code=400, detail="Invalid parameter combination.")
