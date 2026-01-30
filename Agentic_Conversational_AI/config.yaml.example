@@ -1,0 +1,29 @@
+# Conversational Database Analytics Agent Configuration
+# Copy this file to config.yaml and update with your settings
+
+# Flask Server Configuration
+flask_host: 0.0.0.0
+flask_port: 5000
+flask_debug: false
+
+# LLM API Configuration
+llm_api_url: "http://your-llm-api-endpoint.com/generate"
+
+# Database Configuration
+database:
+  host: localhost
+  port: 5432
+  name: your_database_name
+  user: your_database_user
+  password: your_database_password
+
+# Table Context - The default schema and table to query
+table_context:
+  schema: public
+  table: your_table_name
+
+# Agent Configuration (Optional)
+sql_temperature: 0.1
+max_tokens: 500
+max_result_rows: 1000
+

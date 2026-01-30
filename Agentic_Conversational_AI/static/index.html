@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversational Database Analytics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1400px;
+            height: 90vh;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            grid-template-rows: auto 1fr;
+            overflow: hidden;
+        }
+
+        .header {
+            grid-column: 1 / -1;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff4444;
+        }
+
+        .status-dot.connected {
+            background: #00ff88;
+        }
+
+        .sidebar {
+            background: #f8f9fa;
+            padding: 20px;
+            border-right: 1px solid #e0e0e0;
+            overflow-y: auto;
+        }
+
+        .sidebar h3 {
+            font-size: 16px;
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .config-section {
+            margin-bottom: 25px;
+        }
+
+        .info-box {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+
+        .info-item label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        .info-item span {
+            color: #333;
+            font-family: 'Courier New', monospace;
+        }
+
+        .info-note {
+            font-size: 11px;
+            color: #666;
+            padding: 10px;
+            background: #fff3cd;
+            border-radius: 5px;
+            border-left: 3px solid #ffc107;
+        }
+
+        .info-note code {
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .schema-list {
+            background: white;
+            border-radius: 8px;
+            padding: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+
+        .schema-item {
+            padding: 8px;
+            margin-bottom: 5px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .schema-item:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+            margin-top: 10px;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .chat-container {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+            background: #fafafa;
+        }
+
+        .message {
+            margin-bottom: 20px;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            text-align: right;
+        }
+
+        .message-content {
+            display: inline-block;
+            max-width: 70%;
+            padding: 15px 20px;
+            border-radius: 15px;
+            text-align: left;
+        }
+
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .message.agent .message-content {
+            background: white;
+            color: #333;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .sql-box {
+            background: #f5f5f5;
+            border-left: 3px solid #667eea;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+        }
+
+        .chart-container {
+            margin-top: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .data-table {
+            width: 100%;
+            margin-top: 15px;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .data-table th {
+            background: #667eea;
+            color: white;
+            padding: 10px;
+            text-align: left;
+        }
+
+        .data-table td {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .data-table tr:hover {
+            background: #f5f5f5;
+        }
+
+        .input-area {
+            padding: 20px 30px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 15px;
+        }
+
+        .input-area input {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 14px;
+        }
+
+        .input-area input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .input-area button {
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .input-area button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .input-area button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .error {
+            color: #ff4444;
+            font-size: 13px;
+            margin-top: 10px;
+        }
+
+        .success {
+            color: #00ff88;
+            font-size: 13px;
+            margin-top: 10px;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Conversational Database Analytics</h1>
+            <div class="connection-status">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Not Connected</span>
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="config-section">
+                <h3>📋 Configuration Status</h3>
+                <div class="info-box">
+                    <div class="info-item">
+                        <label>LLM API:</label>
+                        <span id="llmStatus">Loading...</span>
+                    </div>
+                    <div class="info-item">
+                        <label>Database:</label>
+                        <span id="dbStatus">Loading...</span>
+                    </div>
+                    <div class="info-item">
+                        <label>Schema:</label>
+                        <span id="schemaStatus">Loading...</span>
+                    </div>
+                    <div class="info-item">
+                        <label>Table:</label>
+                        <span id="tableStatus">Loading...</span>
+                    </div>
+                </div>
+                <div class="info-note">
+                    ℹ️ Configuration is loaded from <code>config.yaml</code>
+                </div>
+            </div>
+
+            <div class="config-section">
+                <h3>🗂️ Available Schemas</h3>
+                <div id="schemaList" class="schema-list">
+                    Loading...
+                </div>
+            </div>
+
+            <div class="config-section">
+                <button class="btn btn-secondary" onclick="clearHistory()">🗑️ Clear History</button>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="chat-container" id="chatContainer">
+                <div class="message agent">
+                    <div class="message-content">
+                        👋 Welcome! Configuration loaded from <code>config.yaml</code>. Start asking questions about your data!
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-area">
+                <input type="text" id="queryInput" placeholder="Ask a question about your data..." 
+                       onkeypress="handleKeyPress(event)">
+                <button onclick="sendQuery()" id="sendBtn">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let currentChart = null;
+
+        async function loadConfigStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/config`);
+                const result = await response.json();
+
+                if (result.configured) {
+                    document.getElementById('llmStatus').textContent = '✅ Configured';
+                    document.getElementById('dbStatus').textContent = '✅ Connected';
+                    document.getElementById('schemaStatus').textContent = result.schema || 'N/A';
+                    document.getElementById('tableStatus').textContent = result.table || 'Not set';
+                    updateStatus(true);
+                    
+                    if (result.table) {
+                        addMessage('agent', `📊 Ready! Querying ${result.schema}.${result.table}`);
+                    }
+                } else {
+                    document.getElementById('llmStatus').textContent = '❌ Not configured';
+                    document.getElementById('dbStatus').textContent = '❌ Not configured';
+                    document.getElementById('schemaStatus').textContent = 'N/A';
+                    document.getElementById('tableStatus').textContent = 'N/A';
+                    updateStatus(false);
+                    addMessage('agent', '⚠️ Configuration error. Please check config.yaml file.');
+                }
+            } catch (error) {
+                console.error('Failed to load config:', error);
+                document.getElementById('llmStatus').textContent = '❌ Error';
+                document.getElementById('dbStatus').textContent = '❌ Error';
+                updateStatus(false);
+            }
+        }
+
+        async function loadSchemas() {
+            try {
+                const response = await fetch(`${API_BASE}/api/schemas`);
+                const result = await response.json();
+
+                if (result.success) {
+                    const schemaList = document.getElementById('schemaList');
+                    schemaList.innerHTML = '';
+                    result.schemas.forEach(schema => {
+                        const div = document.createElement('div');
+                        div.className = 'schema-item';
+                        div.textContent = `📁 ${schema}`;
+                        schemaList.appendChild(div);
+                    });
+                } else {
+                    document.getElementById('schemaList').innerHTML = '<div style="color: #999;">No schemas available</div>';
+                }
+            } catch (error) {
+                console.error('Failed to load schemas:', error);
+                document.getElementById('schemaList').innerHTML = '<div style="color: #ff4444;">Failed to load</div>';
+            }
+        }
+
+        async function sendQuery() {
+            const input = document.getElementById('queryInput');
+            const query = input.value.trim();
+
+            if (!query) return;
+
+            addMessage('user', query);
+            input.value = '';
+            input.disabled = true;
+            document.getElementById('sendBtn').disabled = true;
+
+            const loadingId = addMessage('agent', '<div class="loading"></div>');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query })
+                });
+
+                const result = await response.json();
+
+                removeMessage(loadingId);
+
+                if (result.success) {
+                    displayResult(result);
+                } else {
+                    addMessage('agent', `❌ Error: ${result.error}`);
+                }
+            } catch (error) {
+                removeMessage(loadingId);
+                addMessage('agent', `❌ Failed to process query: ${error.message}`);
+            } finally {
+                input.disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+                input.focus();
+            }
+        }
+
+        function displayResult(result) {
+            let message = `✅ Found ${result.row_count} result(s)\n\n`;
+            message += `<div class="sql-box"><strong>SQL:</strong>\n${result.sql}</div>`;
+
+            if (result.data.length > 0) {
+                // Try to create a chart if data is suitable
+                const chartType = detectChartType(result.data, result.columns);
+                if (chartType) {
+                    const chartId = 'chart-' + Date.now();
+                    message += `<div class="chart-container"><canvas id="${chartId}"></canvas></div>`;
+                }
+
+                // Add data table
+                message += createDataTable(result.data, result.columns);
+            }
+
+            const msgId = addMessage('agent', message);
+
+            // Render chart after message is added to DOM
+            if (result.data.length > 0) {
+                const chartType = detectChartType(result.data, result.columns);
+                if (chartType) {
+                    setTimeout(() => {
+                        const chartId = 'chart-' + (Date.now() - 100);
+                        renderChart(chartId, result.data, result.columns, chartType);
+                    }, 100);
+                }
+            }
+        }
+
+        function detectChartType(data, columns) {
+            if (data.length === 0 || columns.length < 2) return null;
+
+            // Check if we have numeric data
+            const firstRow = data[0];
+            let hasNumeric = false;
+            let numericCol = null;
+
+            for (const col of columns) {
+                if (typeof firstRow[col] === 'number') {
+                    hasNumeric = true;
+                    numericCol = col;
+                    break;
+                }
+            }
+
+            if (hasNumeric) {
+                return data.length > 10 ? 'line' : 'bar';
+            }
+
+            return null;
+        }
+
+        function renderChart(chartId, data, columns, type) {
+            const canvas = document.getElementById(chartId);
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+
+            // Find label and data columns
+            const labelCol = columns[0];
+            const dataCol = columns.find(col => typeof data[0][col] === 'number') || columns[1];
+
+            const labels = data.map(row => String(row[labelCol])).slice(0, 50);
+            const values = data.map(row => Number(row[dataCol]) || 0).slice(0, 50);
+
+            if (currentChart) {
+                currentChart.destroy();
+            }
+
+            currentChart = new Chart(ctx, {
+                type: type,
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: dataCol,
+                        data: values,
+                        backgroundColor: 'rgba(102, 126, 234, 0.5)',
+                        borderColor: 'rgba(102, 126, 234, 1)',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            display: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function createDataTable(data, columns) {
+            let table = '<table class="data-table"><thead><tr>';
+            columns.forEach(col => {
+                table += `<th>${col}</th>`;
+            });
+            table += '</tr></thead><tbody>';
+
+            data.slice(0, 100).forEach(row => {
+                table += '<tr>';
+                columns.forEach(col => {
+                    table += `<td>${row[col] !== null ? row[col] : 'NULL'}</td>`;
+                });
+                table += '</tr>';
+            });
+
+            if (data.length > 100) {
+                table += `<tr><td colspan="${columns.length}" style="text-align:center; color:#999;">... showing first 100 rows ...</td></tr>`;
+            }
+
+            table += '</tbody></table>';
+            return table;
+        }
+
+        function addMessage(sender, content) {
+            const container = document.getElementById('chatContainer');
+            const msgId = 'msg-' + Date.now();
+            const messageDiv = document.createElement('div');
+            messageDiv.id = msgId;
+            messageDiv.className = `message ${sender}`;
+            messageDiv.innerHTML = `<div class="message-content">${content}</div>`;
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+            return msgId;
+        }
+
+        function removeMessage(msgId) {
+            const msg = document.getElementById(msgId);
+            if (msg) msg.remove();
+        }
+
+        async function clearHistory() {
+            try {
+                await fetch(`${API_BASE}/api/history`, { method: 'DELETE' });
+                document.getElementById('chatContainer').innerHTML = '';
+                addMessage('agent', '🔄 History cleared. Ready for new queries!');
+            } catch (error) {
+                console.error('Failed to clear history:', error);
+            }
+        }
+
+        function showMessage(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = type;
+            setTimeout(() => {
+                element.textContent = '';
+                element.className = '';
+            }, 5000);
+        }
+
+        function updateStatus(connected) {
+            const dot = document.getElementById('statusDot');
+            const text = document.getElementById('statusText');
+            if (connected) {
+                dot.classList.add('connected');
+                text.textContent = 'Connected';
+            } else {
+                dot.classList.remove('connected');
+                text.textContent = 'Not Connected';
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendQuery();
+            }
+        }
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadConfigStatus();
+            loadSchemas();
+        });
+    </script>
+</body>
+</html>
+

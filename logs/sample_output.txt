@@ -1,0 +1,74 @@
+================================================================================
+Bhuvan Polygon Fetching Script
+================================================================================
+Batch size: 100
+Skip existing: True
+Dry run: False
+================================================================================
+2026-01-28 19:00:00,123 - services.bhuvan_polygon_service - INFO - ================================================================================
+2026-01-28 19:00:00,123 - services.bhuvan_polygon_service - INFO - Starting Bhuvan polygon fetching process
+2026-01-28 19:00:00,123 - services.bhuvan_polygon_service - INFO - Batch size: 100, Skip existing: True, Dry run: False
+2026-01-28 19:00:00,123 - services.bhuvan_polygon_service - INFO - ================================================================================
+2026-01-28 19:00:02,456 - services.bhuvan_polygon_service - INFO - Retrieved 1250 unique locations
+2026-01-28 19:00:02,456 - services.bhuvan_polygon_service - INFO - Found 1250 unique locations to process
+2026-01-28 19:00:02,456 - services.bhuvan_polygon_service - INFO - Processing batch 1-100 of 1250
+2026-01-28 19:00:03,123 - services.bhuvan_polygon_service - DEBUG - API request attempt 1/3 for village1, district1
+2026-01-28 19:00:03,789 - services.bhuvan_polygon_service - INFO - ✓ Successfully fetched and stored polygon for village1, district1, state1
+2026-01-28 19:00:04,234 - services.bhuvan_polygon_service - DEBUG - API request attempt 1/3 for village2, district2
+2026-01-28 19:00:04,567 - services.bhuvan_polygon_service - INFO - ✓ Successfully fetched and stored polygon for village2, district2, state2
+2026-01-28 19:00:05,012 - services.bhuvan_polygon_service - DEBUG - API request attempt 1/3 for village3, district3
+2026-01-28 19:00:05,345 - services.bhuvan_polygon_service - WARNING - Skipping location L_12345: village or district is null
+2026-01-28 19:00:05,678 - services.bhuvan_polygon_service - DEBUG - API request attempt 1/3 for village4, district4
+2026-01-28 19:00:06,234 - services.bhuvan_polygon_service - WARNING - API error: HTTP 404: Village not found
+2026-01-28 19:00:06,234 - services.bhuvan_polygon_service - ERROR - Failed to fetch polygon for location_id L_67890: Village not found: village4, district4
+2026-01-28 19:00:06,567 - services.bhuvan_polygon_service - DEBUG - API request attempt 1/3 for village5, district5
+2026-01-28 19:00:07,123 - services.bhuvan_polygon_service - INFO - ✓ Successfully fetched and stored polygon for village5, district5, state5
+2026-01-28 19:00:07,456 - services.bhuvan_polygon_service - DEBUG - API request attempt 1/3 for village6, district6
+2026-01-28 19:00:08,234 - services.bhuvan_polygon_service - WARNING - Rate limit exceeded, waiting 2s before retry
+2026-01-28 19:00:10,456 - services.bhuvan_polygon_service - DEBUG - API request attempt 2/3 for village6, district6
+2026-01-28 19:00:10,789 - services.bhuvan_polygon_service - INFO - ✓ Successfully fetched and stored polygon for village6, district6, state6
+2026-01-28 19:00:11,123 - services.bhuvan_polygon_service - DEBUG - API request attempt 1/3 for village7, district7
+2026-01-28 19:00:11,456 - services.bhuvan_polygon_service - DEBUG - Polygon already exists for location_id: L_99999
+2026-01-28 19:00:11,789 - services.bhuvan_polygon_service - INFO - Processing batch 1-100 of 1250
+2026-01-28 19:00:11,789 - services.bhuvan_polygon_service - INFO - Batch 1-100 completed: Success: 95, Failed: 3, Skipped: 2, Duplicates: 0
+2026-01-28 19:00:11,789 - services.bhuvan_polygon_service - INFO - Processing batch 101-200 of 1250
+2026-01-28 19:00:12,123 - services.bhuvan_polygon_service - DEBUG - API request attempt 1/3 for village101, district101
+2026-01-28 19:00:12,456 - services.bhuvan_polygon_service - INFO - ✓ Successfully fetched and stored polygon for village101, district101, state101
+...
+2026-01-28 19:15:30,123 - services.bhuvan_polygon_service - INFO - Processing batch 1201-1250 of 1250
+2026-01-28 19:15:30,456 - services.bhuvan_polygon_service - DEBUG - API request attempt 1/3 for village1201, district1201
+2026-01-28 19:15:30,789 - services.bhuvan_polygon_service - INFO - ✓ Successfully fetched and stored polygon for village1201, district1201, state1201
+...
+2026-01-28 19:16:45,123 - services.bhuvan_polygon_service - INFO - Batch 1201-1250 completed: Success: 48, Failed: 1, Skipped: 1, Duplicates: 0
+2026-01-28 19:16:45,123 - services.bhuvan_polygon_service - INFO - ================================================================================
+2026-01-28 19:16:45,123 - services.bhuvan_polygon_service - INFO - Polygon fetching process completed
+2026-01-28 19:16:45,123 - services.bhuvan_polygon_service - INFO - Total processed: 1250
+2026-01-28 19:16:45,123 - services.bhuvan_polygon_service - INFO - Successful: 1180
+2026-01-28 19:16:45,123 - services.bhuvan_polygon_service - INFO - Failed: 45
+2026-01-28 19:16:45,123 - services.bhuvan_polygon_service - INFO - Skipped: 20
+2026-01-28 19:16:45,123 - services.bhuvan_polygon_service - INFO - Duplicates: 5
+2026-01-28 19:16:45,123 - services.bhuvan_polygon_service - INFO - ================================================================================
+
+================================================================================
+SUMMARY
+================================================================================
+Total processed: 1250
+Successful: 1180
+Failed: 45
+Skipped: 20
+Duplicates: 5
+
+Errors (10):
+  - L_67890: Village not found: village4, district4
+  - L_12346: HTTP 500: Internal server error
+  - L_12347: Request timeout
+  - L_12348: Invalid geometry: coordinates out of range
+  - L_12349: Could not extract geometry from response. Response keys: ['status', 'message']
+  - L_12350: Village not found: village50, district50
+  - L_12351: HTTP 429: Rate limit exceeded
+  - L_12352: Authentication failed - invalid access token
+  - L_12353: Parse error: Expecting value: line 1 column 1 (char 0)
+  - L_12354: Village not found: village54, district54
+  ... and 35 more errors
+================================================================================
+

@@ -1,0 +1,15 @@
+{
+  "test_location": {
+    "village": "delhi",
+    "district": "new delhi",
+    "state": "delhi"
+  },
+  "results": {
+    "/village/boundary": false,
+    "/village/geocode": false,
+    "/village/polygon": false,
+    "/geocoding/village": false,
+    "/village": false
+  },
+  "working_endpoints": []
+}
