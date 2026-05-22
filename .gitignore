@@ -12,6 +12,20 @@ venv/
 
 # Logs
 *.log
+logs/
+
+# Outputs / generated artifacts
+demo_outputs/
+test_outputs/
+output/
+data/
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Local archive workspace (never commit)
+_archive/
 
 # OS
 .DS_Store

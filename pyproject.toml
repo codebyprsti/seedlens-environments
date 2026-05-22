@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.24.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "copernicus-pipeline"
+version = "0.1.0"
+description = "Production CLI for the SeedIQ Copernicus / Sentinel Hub KML batch (wraps run_crop_analysis_s3_batch.py)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+dependencies = [
+    "typer>=0.9.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+progress = ["tqdm>=4.66.0"]
+dev = ["pytest>=7.4.0"]
+
+[project.scripts]
+copernicus-pipeline = "copernicus_pipeline.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["copernicus_pipeline"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
