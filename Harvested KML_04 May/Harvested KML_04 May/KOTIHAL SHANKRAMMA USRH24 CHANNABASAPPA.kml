@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"
+	xmlns:gx="http://www.google.com/kml/ext/2.2">
+<Document>
+	<Style id="transparentPolygon">
+		<LineStyle>
+<color>FF0000FF</color>
+<width>4</width>
+		</LineStyle>
+		<PolyStyle>
+			<color>7FFF0000</color>
+		</PolyStyle>
+	</Style>
+<Placemark>
+<name>Shakramma yadachi 2.41</name><visibility>1</visibility>
+<description><![CDATA[<b>Area:</b><br>&nbsp;&nbsp;&nbsp;&nbsp;0.0m²<br>&nbsp;&nbsp;&nbsp;&nbsp;0.0ha<br>&nbsp;&nbsp;&nbsp;&nbsp;0.0km²<br>&nbsp;&nbsp;&nbsp;&nbsp;0.0ft²<br>&nbsp;&nbsp;&nbsp;&nbsp;0.0yd²<br>&nbsp;&nbsp;&nbsp;&nbsp;0.0acre<br>&nbsp;&nbsp;&nbsp;&nbsp;0.0mi²<br><b>Distance:</b><br>&nbsp;&nbsp;&nbsp;&nbsp;0.0m<br>&nbsp;&nbsp;&nbsp;&nbsp;0.0km<br>&nbsp;&nbsp;&nbsp;&nbsp;0.0ft<br>&nbsp;&nbsp;&nbsp;&nbsp;0.0yd<br>&nbsp;&nbsp;&nbsp;&nbsp;0.0mi]]></description>
+	<styleUrl>#transparentPolygon</styleUrl>	<Polygon>		<outerBoundaryIs>			<LinearRing>
+				<tessellate>1</tessellate>
+				<altitudeMode>clampToGround</altitudeMode>
+				<coordinates>
+				</coordinates>
+			</LinearRing>
+		</outerBoundaryIs>	</Polygon></Placemark>
+</Document>
+</kml>

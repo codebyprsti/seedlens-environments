@@ -77,6 +77,25 @@ def get_stage_status(
     return str(row[0]) if row else None
 
 
+def list_complete_file_names(db: Session, run_id: uuid.UUID) -> set[str]:
+    """file_name values with stage=complete and status=done for this run."""
+    if not _table_ok(db):
+        return set()
+    rows = db.execute(
+        text("""
+            SELECT file_name FROM operations.satellite_ingestion_checkpoint
+            WHERE run_id = CAST(:rid AS uuid)
+              AND stage = :stage AND status = :status
+        """),
+        {
+            "rid": str(run_id),
+            "stage": Stage.COMPLETE.value,
+            "status": CheckpointStatus.DONE.value,
+        },
+    ).fetchall()
+    return {str(r[0]) for r in rows}
+
+
 def should_skip_stage(
     db: Session,
     run_id: uuid.UUID,

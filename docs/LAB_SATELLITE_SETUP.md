@@ -32,13 +32,27 @@ tail -f logs/satellite/harvest_batch.log
 
 ---
 
-## Sync from dev machine (WSL/Git Bash)
+## Sync code from **Windows dev PC** (not from the lab)
+
+The lab has no `/mnt/c/...` path. Run **push** from your Windows machine (WSL or Git Bash):
 
 ```bash
-cd /path/to/SeedIQ-Prod
+# WSL on Windows only:
+cd /mnt/c/Users/madan/ENVIRONMENTS/SeedIQ-Prod
 export LAB_HOST=madanm@10.8.0.1
-chmod +x scripts/push_satellite_lab_to_lab.sh
 ./scripts/push_satellite_lab_to_lab.sh
+```
+
+Or PowerShell after `git push` → `git pull` on lab.
+
+## Upload KMLs (separate from code sync)
+
+```powershell
+# Windows PowerShell
+$env:LAB_SSH_PASS = "your-password"
+cd C:\Users\madan\ENVIRONMENTS\SeedIQ-Prod
+.\scripts\upload_kml_to_lab.ps1 -SampleOnly    # one file test
+.\scripts\upload_kml_to_lab.ps1                # all 253
 ```
 
 Or **git pull** on lab if you committed and pushed:

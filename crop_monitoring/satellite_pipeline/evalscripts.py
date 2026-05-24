@@ -172,3 +172,42 @@ function setup() {
 }
 function evaluatePixel(s) { return [s.VV, s.VH]; }
 """
+
+# Statistical API — daily polygon means (VV/VH + dataMask for no-data)
+STATISTICAL_S1_GRD_V1 = """
+//VERSION=3
+function setup() {
+  return {
+    input: ["VV", "VH", "dataMask"],
+    output: [
+      { id: "sar", bands: 2, sampleType: "FLOAT32" },
+      { id: "dataMask", bands: 1, sampleType: "UINT8" }
+    ]
+  };
+}
+function evaluatePixel(sample) {
+  return {
+    sar: [sample.VV, sample.VH],
+    dataMask: [sample.dataMask]
+  };
+}
+"""
+
+STATISTICAL_S3_SLSTR_V1 = """
+//VERSION=3
+function setup() {
+  return {
+    input: ["S7", "S8", "S9", "dataMask"],
+    output: [
+      { id: "thermal", bands: 3, sampleType: "FLOAT32" },
+      { id: "dataMask", bands: 1, sampleType: "UINT8" }
+    ]
+  };
+}
+function evaluatePixel(sample) {
+  return {
+    thermal: [sample.S7, sample.S8, sample.S9],
+    dataMask: [sample.dataMask]
+  };
+}
+"""

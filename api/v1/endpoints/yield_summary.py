@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -8,6 +9,7 @@ from models.db_models import YieldInspectionView, SeasonCropInspectionBase
 from models.schemas.base import YieldSummaryResponse
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.get("/yield-summary", response_model=List[YieldSummaryResponse])
 async def get_yield_summary(
@@ -15,14 +17,20 @@ async def get_yield_summary(
     crop_id: Optional[str] = Query(None),
     season_id: Optional[str] = Query(None),
     variety_id: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
     village: Optional[str] = Query(None),
     limit: int = Query(300),
     offset: int = Query(0)
 ):
     try:
+        # Log incoming parameters for debugging
+        logger.info(f"[yield-summary] Incoming params: season_id={season_id}, crop_id={crop_id}, "
+                   f"variety_id={variety_id}, state={state}, village={village}, limit={limit}, offset={offset}")
+        
         # Normalize "ALL" values for case-insensitive comparison
         variety_normalized = str(variety_id).strip().lower() if variety_id else ""
         village_normalized = str(village).strip().lower() if village else ""
+        state_normalized = str(state).strip().lower() if state else ""
         
         # Determine grouping based on filter selections
         # Base selected columns (always included)
@@ -103,13 +111,13 @@ async def get_yield_summary(
                 YieldInspectionView.variety_id,
                 YieldInspectionView.variety_name,
                 YieldInspectionView.village,
-                sql_func.trim(SeasonCropInspectionBase.state).label("state")  # Direct state for grouping
+                func.max(YieldInspectionView.state).label("state")  # Direct state for grouping
             ])
             group_by_fields.extend([
                 YieldInspectionView.variety_id,
                 YieldInspectionView.variety_name,
                 YieldInspectionView.village,
-                sql_func.trim(SeasonCropInspectionBase.state)  # Group by state for state-level grouping
+                YieldInspectionView.state  # Group by state for state-level grouping
             ])
             include_variety = True
             include_village = True
@@ -161,21 +169,19 @@ async def get_yield_summary(
             include_state = True  # Include state when variety is included
         
         # Add state column only when variety is selected
+        # YieldInspectionView already has state column, so no join needed!
         if include_state:
-            base_columns.insert(4, func.max(sql_func.trim(SeasonCropInspectionBase.state)).label("state"))
+            # Use MAX() to aggregate state (handles potential NULLs from outerjoin)
+            # Try without trim first to see if that's causing the issue
+            state_expr = func.max(YieldInspectionView.state).label("state")
+            base_columns.insert(4, state_expr)
+            # Add state to GROUP BY (using YieldInspectionView.state directly)
+            group_by_fields.append(YieldInspectionView.state)
 
-        # Build query with join to SeasonCropInspectionBase to get state
-        # Join on season, crop, variety - this is less restrictive and will capture more data
-        # Using LEFT OUTER JOIN ensures we get all records from YieldInspectionView
-        # even if there's no matching state in SeasonCropInspectionBase
-        query = db.query(*base_columns).outerjoin(
-            SeasonCropInspectionBase,
-            (SeasonCropInspectionBase.season_id == YieldInspectionView.season_id) &
-            (SeasonCropInspectionBase.crop_id == YieldInspectionView.crop_id) &
-            (SeasonCropInspectionBase.variety_id == YieldInspectionView.variety_id)
-        )
-
-        # Apply filters (handle "ALL" values)
+        # Build query - no join needed for state since YieldInspectionView has it
+        query = db.query(*base_columns)
+        
+        # Apply filters (handle "ALL" values). Hierarchical dependency: State → District → Village.
         if season_id:
             query = query.filter(YieldInspectionView.season_id == season_id)
         if crop_id:
@@ -187,17 +193,29 @@ async def get_yield_summary(
             query = query.filter(YieldInspectionView.variety_id.isnot(None))
             query = query.filter(YieldInspectionView.variety_name.isnot(None))
             query = query.filter(YieldInspectionView.variety_name != '')
+        # State filter (hierarchical: State → District → Village)
+        if state and state_normalized != "all":
+            query = query.filter(func.lower(func.trim(YieldInspectionView.state)) == state_normalized)
         if village and village_normalized != "all":
-            query = query.filter(YieldInspectionView.village.ilike(f"%{village}%"))
+            query = query.filter(func.lower(func.trim(YieldInspectionView.village)) == village_normalized)
+            # Ensure village belongs to selected state (hierarchical dependency)
+            if state and state_normalized != "all":
+                query = query.filter(func.lower(func.trim(YieldInspectionView.state)) == state_normalized)
         elif village and village_normalized == "all":
             # When village = "ALL", exclude NULL villages to ensure no NULL villages appear
             query = query.filter(YieldInspectionView.village.isnot(None))
             query = query.filter(YieldInspectionView.village != '')
 
         # Group by and apply pagination
+        # State is already in group_by_fields if include_state is True
         query = query.group_by(*group_by_fields).offset(offset).limit(limit)
 
+        # Log SQL query for debugging (before execution)
+        logger.debug(f"[yield-summary] SQL query: {str(query.statement.compile(compile_kwargs={'literal_binds': True}))}")
+        logger.info(f"[yield-summary] GROUP BY fields: {[str(f) for f in group_by_fields]}")
+
         rows = query.all()
+        logger.info(f"[yield-summary] Query returned {len(rows)} rows")
 
         final_results = []
 
@@ -215,13 +233,13 @@ async def get_yield_summary(
             )
 
             # Get and clean state value (trim whitespace) - only if state is included
-            # state_value = None
-            # if include_state:
-            #     state_value = getattr(row, "state", None)
-            #     if state_value and isinstance(state_value, str):
-            #         state_value = state_value.strip()
-            #     elif state_value is None:
-            #         state_value = None
+            state_value = None
+            if include_state:
+                state_value = getattr(row, "state", None)
+                if state_value and isinstance(state_value, str):
+                    state_value = state_value.strip() or None
+                elif state_value is None:
+                    state_value = None
 
             # Build result dictionary with required fields
             result = {
@@ -230,12 +248,12 @@ async def get_yield_summary(
                 "variety_name": row.variety_name if include_variety else None,  # Set to NULL if not in grouping
                 "village": None,  # Initialize with None
                 "grower_name": None,  # Initialize with None
-                # "state": state_value,  # Set to NULL if variety is not selected
-                "total_received_qty": round(total_received_qty, 2) if total_received_qty is not None else None,
-                "total_packed_qty": round(total_packed_qty, 2) if total_packed_qty is not None else None,
+                "state": state_value,  # Include state when variety is selected
+                "total_received_qty": round(total_received_qty, 2) if total_received_qty is not None else 0.0,
+                "total_packed_qty": round(total_packed_qty, 2) if total_packed_qty is not None else 0.0,
                 "avg_productivity": round(avg_productivity, 2) if avg_productivity is not None else None,
-                "forecast_1": round(forecast_1, 2) if forecast_1 is not None else None,
-                "forecast_2": round(forecast_2, 2) if forecast_2 is not None else None
+                "forecast_1": round(forecast_1, 2) if forecast_1 is not None else 0.0,
+                "forecast_2": round(forecast_2, 2) if forecast_2 is not None else 0.0
             }
 
             # Add village if it was selected
@@ -255,8 +273,9 @@ async def get_yield_summary(
                 print(f"Error: {validation_error}")
                 continue
 
+        logger.info(f"[yield-summary] Returning {len(final_results)} results")
         return final_results
 
     except Exception as e:
-        print(f"Full error: {str(e)}")  # Add for debugging
+        logger.exception(f"[yield-summary] Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching yield summary: {str(e)}")

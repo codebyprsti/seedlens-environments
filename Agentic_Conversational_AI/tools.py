@@ -8,10 +8,17 @@ import psycopg2
 import json
 import re
 import logging
+import time
+import random
 from psycopg2.extras import RealDictCursor
 from psycopg2 import errors
 
 logger = logging.getLogger(__name__)
+
+# Retry config for 429/503 rate limits
+MAX_RETRIES = 5
+INITIAL_BACKOFF_SEC = 1.0
+MAX_BACKOFF_SEC = 60.0
 
 
 class LLMTool:
@@ -106,26 +113,85 @@ class LLMTool:
             else:
                 # Generic API format
                 api_url = self.api_url
-            payload = {
-                "prompt": prompt,
-                "conversation_history": conversation_history or [],
+                payload = {
+                    "prompt": prompt,
+                    "conversation_history": conversation_history or [],
                     "temperature": 0.1,
-                "max_tokens": 500
-            }
+                    "max_tokens": 500
+                }
                 headers = {"Content-Type": "application/json"}
             
-            # Make API call to LLM
-            response = requests.post(
-                api_url,
-                json=payload,
-                headers=headers,
-                timeout=30
-            )
+            # Make API call to LLM with exponential backoff retry for 429/503
+            last_error = None
+            response = None
             
-            if response.status_code != 200:
+            for attempt in range(MAX_RETRIES):
+                try:
+                    if attempt > 0:
+                        # Exponential backoff with jitter
+                        delay = min(
+                            INITIAL_BACKOFF_SEC * (2 ** (attempt - 1)) + random.uniform(0, 1),
+                            MAX_BACKOFF_SEC
+                        )
+                        logger.info("Retrying LLM API request (attempt %d/%d) in %.2f seconds", 
+                                   attempt + 1, MAX_RETRIES, delay)
+                        time.sleep(delay)
+                    
+                    logger.debug("Sending request to LLM API: %s (attempt %d/%d)", api_url, attempt + 1, MAX_RETRIES)
+                    response = requests.post(
+                        api_url,
+                        json=payload,
+                        headers=headers,
+                        timeout=30
+                    )
+                    
+                    # Check for rate limit errors (429) or server errors (503)
+                    if response.status_code == 429 or response.status_code == 503:
+                        if attempt < MAX_RETRIES - 1:
+                            logger.warning("Rate limit (429) or server error (503) received, will retry")
+                            last_error = f"LLM API returned status {response.status_code}: {response.text}"
+                            continue
+                        else:
+                            # Last attempt failed
+                            return {
+                                "success": False,
+                                "error": f"LLM API returned status {response.status_code} after {MAX_RETRIES} retries: {response.text}"
+                            }
+                    
+                    if response.status_code != 200:
+                        return {
+                            "success": False,
+                            "error": f"LLM API returned status {response.status_code}: {response.text}"
+                        }
+                    
+                    # Success - break out of retry loop
+                    break
+                    
+                except requests.exceptions.Timeout as e:
+                    if attempt < MAX_RETRIES - 1:
+                        logger.warning("Request timeout, will retry")
+                        last_error = str(e)
+                        continue
+                    else:
+                        return {
+                            "success": False,
+                            "error": f"Request timeout after {MAX_RETRIES} retries: {str(e)}"
+                        }
+                except requests.exceptions.ConnectionError as e:
+                    if attempt < MAX_RETRIES - 1:
+                        logger.warning("Connection error, will retry")
+                        last_error = str(e)
+                        continue
+                    else:
+                        return {
+                            "success": False,
+                            "error": f"Connection error after {MAX_RETRIES} retries: {str(e)}"
+                        }
+            
+            if response is None:
                 return {
                     "success": False,
-                    "error": f"LLM API returned status {response.status_code}: {response.text}"
+                    "error": f"Failed to get response from LLM API after {MAX_RETRIES} retries: {last_error or 'Unknown error'}"
                 }
             
             response_data = response.json()
@@ -137,8 +203,9 @@ class LLMTool:
                 sql_queries = self._extract_sql_from_content(message_content)
                 sql = sql_queries[0] if sql_queries else ""
             else:
-            sql = self._extract_sql(response_data)
+                sql = self._extract_sql(response_data)
             
+            logger.info("Successfully generated SQL from LLM API")
             return {
                 "success": True,
                 "sql": sql,
@@ -152,6 +219,7 @@ class LLMTool:
                 "error": f"Failed to connect to LLM API: {str(e)}"
             }
         except Exception as e:
+            logger.exception("Unexpected error generating SQL: %s", e)
             return {
                 "success": False,
                 "error": f"Error generating SQL: {str(e)}"
@@ -308,8 +376,16 @@ class DatabaseTool:
                 }
                 
         except Exception as e:
+            error_msg = str(e)
+            # Handle psycopg2 errors specifically
+            if hasattr(e, 'pgcode'):
+                error_msg = f"PostgreSQL error {e.pgcode}: {e.pgerror or error_msg}"
+            elif hasattr(e, 'args') and e.args:
+                error_msg = str(e.args[0]) if e.args else error_msg
+            
+            logger.error(f"Failed to get table structure for {schema}.{table}: {error_msg}")
             return {
-                "error": f"Failed to get table structure: {str(e)}",
+                "error": f"Failed to get table structure: {error_msg}",
                 "columns": [],
                 "primary_keys": [],
                 "sample_data": []
@@ -336,40 +412,40 @@ class DatabaseTool:
         
         # Try queries in reverse order (most recent first)
         for query in sql_queries[::-1]:
-        try:
-            with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                # Ensure it's a read-only query
+            try:
+                with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                    # Ensure it's a read-only query
                     sql_lower = query.lower().strip()
-                if not sql_lower.startswith("select"):
-                    return {
-                        "success": False,
-                        "error": "Only SELECT queries are allowed for security reasons"
-                    }
-                
+                    if not sql_lower.startswith("select"):
+                        return {
+                            "success": False,
+                            "error": "Only SELECT queries are allowed for security reasons"
+                        }
+                    
                     # Set search path if schema provided
                     if schema:
                         cursor.execute(f"SET search_path TO {schema};")
                     
                     cursor.execute(query)
-                rows = cursor.fetchall()
-                
-                # Convert to list of dicts (JSON-serializable)
-                data = [dict(row) for row in rows]
-                
+                    rows = cursor.fetchall()
+                    
+                    # Convert to list of dicts (JSON-serializable)
+                    data = [dict(row) for row in rows]
+                    
                     # Get column names and types
                     columns = cursor.description if cursor.description else []
                     column_names = [desc[0] for desc in columns]
-                
-                return {
-                    "success": True,
-                    "data": data,
+                    
+                    return {
+                        "success": True,
+                        "data": data,
                         "columns": column_names,
                         "column_descriptors": columns,  # For utils.build_json
                         "row_count": len(data),
                         "sql": query
-                }
-                
-        except psycopg2.Error as e:
+                    }
+                    
+            except psycopg2.Error as e:
                 error_code = getattr(e, 'pgcode', None)
                 
                 # Handle GROUPING ERROR (42803) - try next query
@@ -380,17 +456,17 @@ class DatabaseTool:
                 else:
                     # Other errors - return failure
                     self.connection.rollback()
-            return {
-                "success": False,
-                "error": f"Database error: {str(e)}",
+                    return {
+                        "success": False,
+                        "error": f"Database error: {str(e)}",
                         "error_code": error_code,
-                "data": []
-            }
-        except Exception as e:
+                        "data": []
+                    }
+            except Exception as e:
                 self.connection.rollback()
-            return {
-                "success": False,
-                "error": f"Error executing query: {str(e)}",
+                return {
+                    "success": False,
+                    "error": f"Error executing query: {str(e)}",
                     "data": []
                 }
         
@@ -398,8 +474,8 @@ class DatabaseTool:
         return {
             "success": False,
             "error": "All queries failed to execute due to errors.",
-                "data": []
-            }
+            "data": []
+        }
     
     def list_schemas(self) -> list[str]:
         """

@@ -1,161 +1,212 @@
-import os
+import sys
+from pathlib import Path
 
-DATABASE_CONFIG = {
-    "dbname": os.environ['dbname'],
-    "user": os.environ['user'],
-    "password": os.environ['password'],
-    "host": os.environ['host'],
-    "port": os.environ['port'],
-}
+# Load from agentic config.yaml only (no environment variables)
+_agentic_db_config = None
+_agentic_llm_config = None
+
+try:
+    # Add parent directory to path to import config_loader
+    _parent_dir = Path(__file__).resolve().parent.parent
+    if str(_parent_dir) not in sys.path:
+        sys.path.insert(0, str(_parent_dir))
+    from config_loader import get_db_config, get_llm_config
+    _agentic_db_config = get_db_config()
+    _agentic_llm_config = get_llm_config()
+except (ImportError, Exception) as e:
+    # If config_loader fails, configs will be None
+    _agentic_db_config = None
+    _agentic_llm_config = None
 
 
-LLM_CONFIG = {
-    'base_url': "https://api.sambanova.ai/v1",
-    'api_key' : "aa0a862a-5c6b-43b7-81cf-5d1a90d4751f"
-    #  'api_key' : "b972fd9c-f064-4b63-8b1a-8c17bb52d8a3"
-    # 'api_key': "f45e45ac-53fe-426f-b020-2d24a7306830"
-    # 'api_key': "d0e931bd-97eb-4d9e-a980-80c8eab6857b"
-}
+def _get_database_config():
+    """
+    Get database config from agentic config.yaml only.
+    No environment variables used.
+    """
+    if _agentic_db_config:
+        return {
+            "database": _agentic_db_config.get("database", ""),
+            "dbname": _agentic_db_config.get("database", ""),  # Support both keys for compatibility
+            "user": _agentic_db_config.get("user", ""),
+            "password": _agentic_db_config.get("password", ""),
+            "host": _agentic_db_config.get("host", "localhost"),
+            "port": int(_agentic_db_config.get("port", 5432)),
+        }
+    
+    # Return None if config not available (will raise clear error when used)
+    return None
 
-LLAMA_API_URL = "http://localhost:11434"
 
-schema = """
-CREATE TABLE IF NOT EXISTS sales_data (
-    business_line  character(60) COLLATE pg_catalog."default",
-    branch  character(60) COLLATE pg_catalog."default",
-    region   character(60) COLLATE pg_catalog."default",
-    product             character(100) COLLATE pg_catalog."default",
-    service             character(100) COLLATE pg_catalog."default",
-    transaction_date    date,
-    gross_amount        numeric(16,4),
-    discounts           numeric(10,2),
-    net_amount          numeric(16,4),
-    cgst                numeric(10,2),
-    sgst                numeric(10,2),
-    igst                numeric(10,2),
-    taxes               numeric(10,2),
-    total_sales         numeric(16,4),
-    amount_paid         numeric(16,4),
-    cogs                numeric(10,2),
-    sales_itm_qty       integer,
-    manufacturer        character(100) COLLATE pg_catalog."default",
-    quest_code          character(100) COLLATE pg_catalog."default",
-    guest_id            character(100) COLLATE pg_catalog."default",
-    guest_name          character(100) COLLATE pg_catalog."default",
-    holiday             character(60) COLLATE pg_catalog."default",
-    shipping_cost       numeric(10,2),
-    cos                 numeric(10,2),
-    margin              numeric(10,2)
-);
-"""
-schema_name = "idea_clinic"
-table_name = 'idea_clinic.sales_data'
-few_shot_prompt = """
-Translate the following natural language questions into PostgreSQL SQL queries based on the table structure provided in the schema.
+def _get_llm_config():
+    """
+    Get LLM config from agentic config.yaml only.
+    No environment variables used.
+    """
+    if _agentic_llm_config:
+        return {
+            'base_url': _agentic_llm_config.get("llm_api_url", "https://api.sambanova.ai/v1"),
+            'api_key': _agentic_llm_config.get("llm_api_key", ""),
+            'model': _agentic_llm_config.get("llm_model", "Meta-Llama-3.3-70B-Instruct")
+        }
+    
+    # Return None if config not available (will raise clear error when used)
+    return None
 
-1. What is the total sales amount for each product?
-SQL:
-SELECT product, SUM(gross_amount) AS total_sales
-FROM idea_clinics.sales_data
-GROUP BY product;
 
-2. Get the total sales and gross amount for each region in the year 2023.
-SQL:
-SELECT region, SUM(net_amount) AS total_sales, SUM(gross_amount) AS total_gross_amount
-FROM idea_clinics.sales_data
-WHERE EXTRACT(YEAR FROM transaction_date) = 2023
-GROUP BY region;
+# Load configs from config.yaml only
+DATABASE_CONFIG = _get_database_config()
 
-3. Find the total discounts applied for each product in the 'Electronics' category.
-SQL:
-SELECT product, SUM(discounts) AS total_discounts
-FROM idea_clinics.sales_data
-WHERE category = 'Electronics'
-GROUP BY product;
+LLM_CONFIG = _get_llm_config()
 
-4. List all products that had a net amount  greater than 1000 and a margin greater than 50.
-SQL:
-SELECT product, net_amount, margin
-FROM idea_clinics.sales_data
-WHERE net_amount > 1000 AND margin > 50;
+# LLAMA_API_URL - not used in production, kept for reference
+LLAMA_API_URL = 'http://localhost:11434'
 
-5. Get the average sales quantity for each branch in 2023.
-SQL:
-SELECT branch, AVG(sale_itm_qty) AS avg_sales_qty
-FROM idea_clinics.sales_data
-WHERE EXTRACT(YEAR FROM transaction_date::DATE) = 2023
-GROUP BY branch;
+# Default schema name from config.yaml
+try:
+    from config_loader import get_table_context
+    _, _default_table = get_table_context()
+    schema_name = _default_table.split('.')[-1] if '.' in _default_table else _default_table
+except (ImportError, Exception):
+    schema_name = "public"
 
-6. Show the total sales, taxes, and shipping costs for each product in the 'Hyderabad' region.
-SQL:
-SELECT product, SUM(gross_amount) AS total_sales, SUM(taxes) AS total_taxes, SUM(shipping_cost) AS total_shipping_cost
-FROM idea_clinics.sales_data
-WHERE region = 'Hyderabad'
-GROUP BY product;
+# schema = """
+# CREATE TABLE IF NOT EXISTS sales_data (
+#     business_line  character(60) COLLATE pg_catalog."default",
+#     branch  character(60) COLLATE pg_catalog."default",
+#     region   character(60) COLLATE pg_catalog."default",
+#     product             character(100) COLLATE pg_catalog."default",
+#     service             character(100) COLLATE pg_catalog."default",
+#     transaction_date    date,
+#     gross_amount        numeric(16,4),
+#     discounts           numeric(10,2),
+#     net_amount          numeric(16,4),
+#     cgst                numeric(10,2),
+#     sgst                numeric(10,2),
+#     igst                numeric(10,2),
+#     taxes               numeric(10,2),
+#     total_sales         numeric(16,4),
+#     amount_paid         numeric(16,4),
+#     cogs                numeric(10,2),
+#     sales_itm_qty       integer,
+#     manufacturer        character(100) COLLATE pg_catalog."default",
+#     quest_code          character(100) COLLATE pg_catalog."default",
+#     guest_id            character(100) COLLATE pg_catalog."default",
+#     guest_name          character(100) COLLATE pg_catalog."default",
+#     holiday             character(60) COLLATE pg_catalog."default",
+#     shipping_cost       numeric(10,2),
+#     cos                 numeric(10,2),
+#     margin              numeric(10,2)
+# );
+# """
+# schema_name = "idea_clinic"
+# table_name = 'idea_clinic.sales_data'
+# few_shot_prompt = """
+# Translate the following natural language questions into PostgreSQL SQL queries based on the table structure provided in the schema.
 
-7. Find the region with the highest net amount and its associated gross amount.
-SQL:
-SELECT region, SUM(net_amount) AS total_net_amount, SUM(gross_amount) AS total_gross_amount
-FROM idea_clinics.sales_data
-GROUP BY region
-ORDER BY total_net_amount DESC
-LIMIT 1;
+# 1. What is the total sales amount for each product?
+# SQL:
+# SELECT product, SUM(gross_amount) AS total_sales
+# FROM idea_clinics.sales_data
+# GROUP BY product;
 
-8. Get the total cost of goods sold (COGS) for each service type.
-SQL:
-SELECT service, SUM(cogs) AS total_cogs
-FROM idea_clinics.sales_data
-GROUP BY service;
+# 2. Get the total sales and gross amount for each region in the year 2023.
+# SQL:
+# SELECT region, SUM(net_amount) AS total_sales, SUM(gross_amount) AS total_gross_amount
+# FROM idea_clinics.sales_data
+# WHERE EXTRACT(YEAR FROM transaction_date) = 2023
+# GROUP BY region;
 
-9. Retrieve the branch, business line, region, total sales, and margin for each transaction where the business line is either Clinic Sales and Pharmacy Sales, and the net amount is greater than 500.
-SQL:
-SELECT
-    branch,
-    business_line,
-    region,
-    total_sales,
-    margin,
-    net_amount
-FROM
-        		idea_clinics.sales_data
-WHERE
-    business_line IN ('Clinic Sales', 'Pharmacy Sales')
-    AND net_amount > 500;
+# 3. Find the total discounts applied for each product in the 'Electronics' category.
+# SQL:
+# SELECT product, SUM(discounts) AS total_discounts
+# FROM idea_clinics.sales_data
+# WHERE category = 'Electronics'
+# GROUP BY product;
 
-10. Find the total sales for each service type by region.
-SQL:
-SELECT service, region, SUM(net_amount) AS total_sales
-FROM    idea_clinics.sales_data
-GROUP BY service, region;
+# 4. List all products that had a net amount  greater than 1000 and a margin greater than 50.
+# SQL:
+# SELECT product, net_amount, margin
+# FROM idea_clinics.sales_data
+# WHERE net_amount > 1000 AND margin > 50;
 
-11. Get top 3 products sold by region
-SQL:
-WITH region_products AS (
-        	SELECT
-        		"region",
-        		"product",
-        		SUM("gross_amount") AS total_gross_amount
-        	FROM
-        		idea_clinics.sales_data
-        	GROUP BY
-        		"region",
-        		"product"
-        )
-        SELECT
-        	"region",
-        	"product",
-        	total_gross_amount
-        FROM
-        	(
-        		SELECT
-        			"region",
-        			"product",
-        			total_gross_amount,
-        			ROW_NUMBER() OVER(PARTITION BY "region" ORDER BY total_gross_amount DESC) as rn
-        		FROM
-        			region_products
-        	) rp
-        WHERE
-        	rn <= 3
-"""
+# 5. Get the average sales quantity for each branch in 2023.
+# SQL:
+# SELECT branch, AVG(sale_itm_qty) AS avg_sales_qty
+# FROM idea_clinics.sales_data
+# WHERE EXTRACT(YEAR FROM transaction_date::DATE) = 2023
+# GROUP BY branch;
+
+# 6. Show the total sales, taxes, and shipping costs for each product in the 'Hyderabad' region.
+# SQL:
+# SELECT product, SUM(gross_amount) AS total_sales, SUM(taxes) AS total_taxes, SUM(shipping_cost) AS total_shipping_cost
+# FROM idea_clinics.sales_data
+# WHERE region = 'Hyderabad'
+# GROUP BY product;
+
+# 7. Find the region with the highest net amount and its associated gross amount.
+# SQL:
+# SELECT region, SUM(net_amount) AS total_net_amount, SUM(gross_amount) AS total_gross_amount
+# FROM idea_clinics.sales_data
+# GROUP BY region
+# ORDER BY total_net_amount DESC
+# LIMIT 1;
+
+# 8. Get the total cost of goods sold (COGS) for each service type.
+# SQL:
+# SELECT service, SUM(cogs) AS total_cogs
+# FROM idea_clinics.sales_data
+# GROUP BY service;
+
+# 9. Retrieve the branch, business line, region, total sales, and margin for each transaction where the business line is either Clinic Sales and Pharmacy Sales, and the net amount is greater than 500.
+# SQL:
+# SELECT
+#     branch,
+#     business_line,
+#     region,
+#     total_sales,
+#     margin,
+#     net_amount
+# FROM
+#         		idea_clinics.sales_data
+# WHERE
+#     business_line IN ('Clinic Sales', 'Pharmacy Sales')
+#     AND net_amount > 500;
+
+# 10. Find the total sales for each service type by region.
+# SQL:
+# SELECT service, region, SUM(net_amount) AS total_sales
+# FROM    idea_clinics.sales_data
+# GROUP BY service, region;
+
+# 11. Get top 3 products sold by region
+# SQL:
+# WITH region_products AS (
+#         	SELECT
+#         		"region",
+#         		"product",
+#         		SUM("gross_amount") AS total_gross_amount
+#         	FROM
+#         		idea_clinics.sales_data
+#         	GROUP BY
+#         		"region",
+#         		"product"
+#         )
+#         SELECT
+#         	"region",
+#         	"product",
+#         	total_gross_amount
+#         FROM
+#         	(
+#         		SELECT
+#         			"region",
+#         			"product",
+#         			total_gross_amount,
+#         			ROW_NUMBER() OVER(PARTITION BY "region" ORDER BY total_gross_amount DESC) as rn
+#         		FROM
+#         			region_products
+#         	) rp
+#         WHERE
+#         	rn <= 3
+# """
 

@@ -2,7 +2,8 @@
 # Lab execution wrapper: ensures dirs + venv, then runs run_satellite_lab.py
 # Usage:
 #   ./scripts/lab_exec.sh validate --expected-kml 253
-#   ./scripts/lab_exec.sh run --start 2025-12-01 --end 2026-03-18 --season-id RABI_25_26
+#   ./scripts/lab_exec.sh run --start 2025-12-01 --end 2026-03-18 --season-id RABI_25_26 --maxcc 20
+#   ./scripts/lab_exec.sh run --continue-last-run --start ... --end ... --maxcc 20   # after partial batch
 #   nohup ./scripts/lab_exec.sh run ... > logs/satellite/harvest_batch.log 2>&1 &
 set -euo pipefail
 
@@ -39,6 +40,12 @@ if [[ -f "$ROOT/.env" ]]; then
   # shellcheck disable=SC1091
   source "$ROOT/.env"
   set +a
+else
+  echo "WARN: $ROOT/.env not found — SH_CLIENT_ID/SECRET and DB_* may be unset" >&2
 fi
+
+# sentinelhub reads SHConfig; pipeline uses SH_CLIENT_ID / SH_CLIENT_SECRET from env
+export SH_CLIENT_ID="${SH_CLIENT_ID:-}"
+export SH_CLIENT_SECRET="${SH_CLIENT_SECRET:-}"
 
 exec python "$ROOT/scripts/run_satellite_lab.py" "$@"

@@ -1,9 +1,11 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body
 from sqlalchemy.orm import Session
 from typing import List, Optional, Union, Dict, Any
 from core.db import get_db
 from services.location_service import LocationService
+from services.polygon_sync_orchestrator import PolygonSyncOrchestrator
+from services.bhuvan_polygon_service import BhuvanPolygonService
 from models.db_models import LocationRecord
 from models.schemas.base import (
     LocationUpdateRequest, 
@@ -103,6 +105,24 @@ async def get_locations(
             error_msg = f"Failed to fetch locations: {error_detail[:200]}. Try with a smaller limit (current: {limit}) or add filters."
         
         raise HTTPException(status_code=500, detail=error_msg)
+
+
+@router.get("/field-locations")
+async def get_field_locations(db: Session = Depends(get_db)):
+    """
+    Get all field locations from operations.field_locations (KML-ingested locations).
+    Returns data + columns in the same structure as GET /locations.
+    """
+    try:
+        service = LocationService(db)
+        data = service.get_field_locations()
+        columns = service.get_field_locations_columns()
+        return {"data": data, "columns": columns}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error fetching field locations: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch field locations: {str(e)}")
 
 
 @router.put("/locations/{location_id}", response_model=LocationUpdateResponse)
@@ -248,4 +268,52 @@ async def get_locations_dropdown(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch location dropdown options: {str(e)}")
+
+
+@router.post("/locations/sync-polygons", response_model=Dict[str, Any])
+async def sync_location_polygons(
+    db: Session = Depends(get_db),
+    batch_size: int = Query(50, ge=1, le=200, description="Locations per batch (API default capped at 200)"),
+    skip_existing: bool = Query(True, description="Skip locations that already have a polygon"),
+    dry_run: bool = Query(False, description="If true, no API calls or DB writes"),
+    use_batch_transaction: bool = Query(True, description="Commit polygon inserts per batch in one transaction"),
+    location_ids: Optional[List[str]] = Body(None, embed=True, description="Optional list of location_id to sync (partial sync); if omitted, sync all eligible"),
+):
+    """
+    Sync village polygons from the external Polygon (Bhuvan) API into operations.location_polygons.
+    
+    Flow: read locations from operations.locations -> call Polygon API per location ->
+    parse/validate response -> insert into location_polygons (idempotent, no duplicates).
+    
+    For large runs, prefer the CLI script: `python scripts/fetch_bhuvan_polygons.py`.
+    """
+    try:
+        orchestrator = PolygonSyncOrchestrator(db)
+        stats = orchestrator.sync_polygons(
+            batch_size=batch_size,
+            skip_existing=skip_existing,
+            dry_run=dry_run,
+            location_ids=location_ids,
+            use_batch_transaction=use_batch_transaction,
+        )
+        return stats
+    except Exception as e:
+        logger.exception("Polygon sync failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Polygon sync failed: {str(e)}")
+
+
+@router.post("/locations/debug-insert-polygon", response_model=Dict[str, Any])
+async def debug_insert_polygon(db: Session = Depends(get_db)):
+    """
+    Temporary: minimal isolated DB insert test for operations.location_polygons.
+    Calls BhuvanPolygonService.debug_force_insert() and returns { "rowcount": ..., "count_after": ... }.
+    Remove after verification.
+    """
+    try:
+        service = BhuvanPolygonService(db)
+        result = service.debug_force_insert()
+        return result
+    except Exception as e:
+        logger.exception("Debug force insert failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 

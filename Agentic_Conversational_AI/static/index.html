@@ -369,8 +369,12 @@
                         <span id="tableStatus">Loading...</span>
                     </div>
                 </div>
+                <div class="info-item" id="agenticStatusRow">
+                    <label>Agentic AI:</label>
+                    <span id="agenticStatus">Loading...</span>
+                </div>
                 <div class="info-note">
-                    ℹ️ Configuration is loaded from <code>config.yaml</code>
+                    ℹ️ Configuration is loaded from agentic <code>config.yaml</code> (separate from main project DB).
                 </div>
             </div>
 
@@ -405,11 +409,12 @@
 
     <script>
         const API_BASE = window.location.origin;
+        const AGENTIC_API = `${API_BASE}/api/v1/agentic`;
         let currentChart = null;
 
         async function loadConfigStatus() {
             try {
-                const response = await fetch(`${API_BASE}/api/config`);
+                const response = await fetch(`${AGENTIC_API}/config`);
                 const result = await response.json();
 
                 if (result.configured) {
@@ -417,8 +422,9 @@
                     document.getElementById('dbStatus').textContent = '✅ Connected';
                     document.getElementById('schemaStatus').textContent = result.schema || 'N/A';
                     document.getElementById('tableStatus').textContent = result.table || 'Not set';
+                    var agenticEl = document.getElementById('agenticStatus');
+                    if (agenticEl) agenticEl.textContent = result.agentic_initialized ? '✅ Ready' : '⚠️ Initializing';
                     updateStatus(true);
-                    
                     if (result.table) {
                         addMessage('agent', `📊 Ready! Querying ${result.schema}.${result.table}`);
                     }
@@ -427,20 +433,24 @@
                     document.getElementById('dbStatus').textContent = '❌ Not configured';
                     document.getElementById('schemaStatus').textContent = 'N/A';
                     document.getElementById('tableStatus').textContent = 'N/A';
+                    var agenticEl = document.getElementById('agenticStatus');
+                    if (agenticEl) agenticEl.textContent = '❌ Not configured';
                     updateStatus(false);
-                    addMessage('agent', '⚠️ Configuration error. Please check config.yaml file.');
+                    addMessage('agent', '⚠️ Configuration error. Check agentic config.yaml and ensure LLM/DB are set.');
                 }
             } catch (error) {
                 console.error('Failed to load config:', error);
                 document.getElementById('llmStatus').textContent = '❌ Error';
                 document.getElementById('dbStatus').textContent = '❌ Error';
+                var agenticEl = document.getElementById('agenticStatus');
+                if (agenticEl) agenticEl.textContent = '❌ Error';
                 updateStatus(false);
             }
         }
 
         async function loadSchemas() {
             try {
-                const response = await fetch(`${API_BASE}/api/schemas`);
+                const response = await fetch(`${AGENTIC_API}/schemas`);
                 const result = await response.json();
 
                 if (result.success) {
@@ -475,7 +485,7 @@
             const loadingId = addMessage('agent', '<div class="loading"></div>');
 
             try {
-                const response = await fetch(`${API_BASE}/api/query`, {
+                const response = await fetch(`${AGENTIC_API}/query`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ query })
@@ -635,7 +645,7 @@
 
         async function clearHistory() {
             try {
-                await fetch(`${API_BASE}/api/history`, { method: 'DELETE' });
+                await fetch(`${AGENTIC_API}/history`, { method: 'DELETE' });
                 document.getElementById('chatContainer').innerHTML = '';
                 addMessage('agent', '🔄 History cleared. Ready for new queries!');
             } catch (error) {

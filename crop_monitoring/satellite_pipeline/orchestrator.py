@@ -1,10 +1,11 @@
 """
-Production orchestrator v2: checkpointed, STAC-linked, bulk Statistical + per-day S1/S3.
+Production orchestrator v2: checkpointed, STAC-linked, bulk Statistical S2/S1/S3.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -44,7 +45,11 @@ from crop_monitoring.satellite_pipeline.stac_catalog import (
     search_stac_scenes,
 )
 from crop_monitoring.satellite_pipeline.field_context import FieldContext
-from crop_monitoring.satellite_pipeline.raw_cache import indices_row_exists, raw_exists_for_s2_season
+from crop_monitoring.satellite_pipeline.raw_cache import (
+    indices_row_exists,
+    raw_exists_for_s1s3_bulk,
+    raw_exists_for_s2_season,
+)
 from crop_monitoring.satellite_pipeline.temporal_batch import BatchStrategy, calendar_dates_inclusive
 
 logger = logging.getLogger(__name__)
@@ -52,7 +57,7 @@ logger = logging.getLogger(__name__)
 S1_LOOKBACK_DAYS = 12
 S3_PAD_BEFORE = 1
 S3_PAD_AFTER = 2
-MAX_S1_S3_WORKERS = 8
+MAX_S1_S3_WORKERS = max(1, int(os.environ.get("SATELLITE_MAX_S1_S3_WORKERS", "4")))
 API_RETRY_ATTEMPTS = 3
 API_RETRY_BASE_SEC = 2.0
 FAILED_DAY_RETRY = 2
@@ -135,6 +140,10 @@ class SatelliteIngestionOrchestrator:
         grower_id: Optional[str],
         skip_existing: bool,
         counts: dict[str, Any],
+        orbit_direction_s1: Optional[str] = None,
+        orbit_direction_s3: Optional[str] = None,
+        raw_id_s1: Optional[int] = None,
+        raw_id_s3: Optional[int] = None,
     ) -> bool:
         """Upsert S1/S3 rows for one calendar day. Returns True if any row written."""
         if skip_existing and internal_id:
@@ -156,10 +165,13 @@ class SatelliteIngestionOrchestrator:
             file_name=file_name,
             season_id=self.season_id,
             acquisition_date=ad,
+            raw_observation_id=raw_id_s1,
             internal_id=internal_id,
             grower_name=grower_name,
             grower_id=grower_id,
         )
+        if orbit_direction_s1:
+            s1_rec["orbit_direction"] = orbit_direction_s1
         if upsert_sentinel1_indices(self.db, s1_rec):
             counts["s1"] += 1
             wrote = True
@@ -170,14 +182,246 @@ class SatelliteIngestionOrchestrator:
             file_name=file_name,
             season_id=self.season_id,
             acquisition_date=ad,
+            raw_observation_id=raw_id_s3,
             internal_id=internal_id,
             grower_name=grower_name,
             grower_id=grower_id,
         )
+        if orbit_direction_s3:
+            s3_rec["orbit_direction"] = orbit_direction_s3
         if upsert_sentinel3_indices(self.db, s3_rec):
             counts["s3"] += 1
             wrote = True
         return wrote
+
+    def _fetch_s1s3_process_per_day(
+        self,
+        geojson: dict,
+        api_dates: list[str],
+    ) -> dict[str, tuple[Any, ...]]:
+        """Legacy Process API path — one S1 + one S3 call per calendar day."""
+        s1s3_by_date: dict[str, tuple[Any, ...]] = {}
+        if not api_dates:
+            return s1s3_by_date
+        with ThreadPoolExecutor(max_workers=min(MAX_S1_S3_WORKERS, len(api_dates))) as ex:
+            futs = {ex.submit(_polygon_mean_s1_s3, geojson, ad): ad for ad in api_dates}
+            for fut in as_completed(futs):
+                ad = futs[fut]
+                for attempt in range(FAILED_DAY_RETRY):
+                    try:
+                        s1s3_by_date[ad] = fut.result()
+                        break
+                    except Exception as e:
+                        if attempt + 1 >= FAILED_DAY_RETRY:
+                            logger.warning("S1/S3 Process API failed date=%s: %s", ad, e)
+                            s1s3_by_date[ad] = (None,) * 6
+                        time.sleep(API_RETRY_BASE_SEC)
+        return s1s3_by_date
+
+    def _fetch_s1s3_calendar(
+        self,
+        *,
+        geojson: dict,
+        file_name: str,
+        location_id: str,
+        start_str: str,
+        end_str: str,
+        calendar_dates: list[str],
+        s1s3_fetch_dates: list[str],
+        iid: Optional[str],
+        grower_name: Optional[str],
+        grower_id: Optional[str],
+    ) -> tuple[dict[str, tuple[Any, ...]], dict[str, str], dict[str, str], Optional[int], Optional[int]]:
+        """
+        Bulk Statistical API (default) or Process API fallback.
+        Returns (s1s3_by_date, s1_orbit_by_date, s3_orbit_by_date, raw_id_s1, raw_id_s3).
+        """
+        from crop_monitoring.satellite_pipeline.fetch_s1_s3_statistical import (
+            fetch_s1s3_bulk_calendar,
+            load_s1s3_from_stored_raw,
+            use_s1s3_statistical_api,
+        )
+        from crop_monitoring.satellite_pipeline.reprocess import load_raw_rows
+
+        expansion_dates = calendar_dates if self.s1_s3_every_calendar_day else s1s3_fetch_dates
+        s1s3_by_date: dict[str, tuple[Any, ...]] = {}
+        s1_orbit: dict[str, str] = {}
+        s3_orbit: dict[str, str] = {}
+        raw_id_s1: Optional[int] = None
+        raw_id_s3: Optional[int] = None
+
+        if not expansion_dates:
+            return s1s3_by_date, s1_orbit, s3_orbit, raw_id_s1, raw_id_s3
+
+        raw_cached = raw_exists_for_s1s3_bulk(
+            self.db,
+            location_id=location_id,
+            file_name=file_name,
+            season_id=self.season_id,
+            start_date=start_str,
+        )
+        skip_fetch = (
+            should_skip_stage(self.db, self.run_id, file_name, Stage.RAW_S1, resume=self.resume)
+            or raw_cached
+        )
+
+        use_stat = use_s1s3_statistical_api()
+
+        if skip_fetch and use_stat:
+            s1_payload = s3_payload = None
+            for row in load_raw_rows(
+                self.db, location_id=location_id, file_name=file_name
+            ):
+                src = row.get("source") or ""
+                if src == "copernicus_s1_statistical_v2":
+                    s1_payload = row.get("raw_response")
+                    raw_id_s1 = raw_id_s1 or row.get("id")
+                if src == "copernicus_s3_statistical_v2":
+                    s3_payload = row.get("raw_response")
+                    raw_id_s3 = raw_id_s3 or row.get("id")
+            if s1_payload and s3_payload:
+                s1s3_by_date = load_s1s3_from_stored_raw(
+                    s1_payload, s3_payload, expansion_dates
+                )
+                logger.info(
+                    "Reusing stored S1/S3 Statistical raw for %s (%d calendar days)",
+                    file_name,
+                    len(expansion_dates),
+                )
+                return s1s3_by_date, s1_orbit, s3_orbit, raw_id_s1, raw_id_s3
+            logger.warning("Stored S1/S3 raw unparseable for %s — refetching", file_name)
+            skip_fetch = False
+
+        if use_stat and not skip_fetch:
+            try:
+                bulk_by_date, s1_raw, s3_raw, api_stats = _retry(
+                    fetch_s1s3_bulk_calendar,
+                    geojson,
+                    start_str,
+                    end_str,
+                    expansion_dates,
+                    batch_strategy=self.batch_strategy,
+                )
+                s1s3_by_date = bulk_by_date
+                from crop_monitoring.satellite_pipeline.layers.harmonize import (
+                    parse_s1_stats_response,
+                    parse_s3_stats_response,
+                )
+
+                s1_daily_rows = [
+                    parse_s1_stats_response(item)
+                    for chunk in s1_raw
+                    for item in (chunk.get("data") or [])
+                ]
+                s3_daily_rows = [
+                    parse_s3_stats_response(item)
+                    for chunk in s3_raw
+                    for item in (chunk.get("data") or [])
+                ]
+                for row in s1_daily_rows:
+                    ad = row.get("acquisition_date")
+                    if ad and row.get("orbit_direction"):
+                        s1_orbit[str(ad)[:10]] = row["orbit_direction"]
+                for row in s3_daily_rows:
+                    ad = row.get("acquisition_date")
+                    if ad and row.get("orbit_direction"):
+                        s3_orbit[str(ad)[:10]] = row["orbit_direction"]
+
+                raw_id_s1 = store_raw(
+                    self.db,
+                    location_id=location_id,
+                    file_name=file_name,
+                    satellite="S1",
+                    source="copernicus_s1_statistical_v2",
+                    api_type="statistical",
+                    season_id=self.season_id,
+                    run_id=self.run_id,
+                    internal_id=iid,
+                    grower_name=grower_name,
+                    grower_id=grower_id,
+                    bands=s1_daily_rows,
+                    raw_response={
+                        "layer": "statistical_s1_grd_p1d",
+                        "interval": [start_str, end_str],
+                        "strategy": self.batch_strategy,
+                        "api_stats": api_stats,
+                        "chunks": s1_raw,
+                    },
+                    metadata={"api_stats": api_stats},
+                )
+                raw_id_s3 = store_raw(
+                    self.db,
+                    location_id=location_id,
+                    file_name=file_name,
+                    satellite="S3",
+                    source="copernicus_s3_statistical_v2",
+                    api_type="statistical",
+                    season_id=self.season_id,
+                    run_id=self.run_id,
+                    internal_id=iid,
+                    grower_name=grower_name,
+                    grower_id=grower_id,
+                    bands=s3_daily_rows,
+                    raw_response={
+                        "layer": "statistical_s3_slstr_p1d",
+                        "interval": [start_str, end_str],
+                        "strategy": self.batch_strategy,
+                        "api_stats": api_stats,
+                        "chunks": s3_raw,
+                    },
+                    metadata={"api_stats": api_stats},
+                )
+                upsert_checkpoint(
+                    self.db,
+                    run_id=self.run_id,
+                    file_name=file_name,
+                    stage=Stage.RAW_S1,
+                    status=CheckpointStatus.DONE,
+                    location_id=location_id,
+                    raw_observation_id=raw_id_s1,
+                )
+                upsert_checkpoint(
+                    self.db,
+                    run_id=self.run_id,
+                    file_name=file_name,
+                    stage=Stage.RAW_S3,
+                    status=CheckpointStatus.DONE,
+                    location_id=location_id,
+                    raw_observation_id=raw_id_s3,
+                )
+                logger.info(
+                    "%s: S1/S3 Statistical bulk OK (%s)",
+                    file_name,
+                    api_stats,
+                )
+                return s1s3_by_date, s1_orbit, s3_orbit, raw_id_s1, raw_id_s3
+            except Exception as e:
+                logger.warning(
+                    "S1/S3 Statistical bulk failed for %s: %s — falling back to Process API",
+                    file_name,
+                    e,
+                )
+
+        # Process API fallback (per-day) for remaining/missing dates only
+        api_dates = list(s1s3_fetch_dates)
+        if skip_fetch and not use_stat:
+            return s1s3_by_date, s1_orbit, s3_orbit, raw_id_s1, raw_id_s3
+        process_dates = api_dates
+        if use_stat and s1s3_by_date:
+            process_dates = [
+                ad
+                for ad in api_dates
+                if ad not in s1s3_by_date or all(v is None for v in s1s3_by_date.get(ad, (None,) * 6))
+            ]
+        if process_dates:
+            logger.info(
+                "%s: S1/S3 Process API fallback for %d days",
+                file_name,
+                len(process_dates),
+            )
+            proc = self._fetch_s1s3_process_per_day(geojson, process_dates)
+            s1s3_by_date.update(proc)
+        return s1s3_by_date, s1_orbit, s3_orbit, raw_id_s1, raw_id_s3
 
     def __init__(
         self,
@@ -527,24 +771,64 @@ class SatelliteIngestionOrchestrator:
             start_str,
             end_str,
         )
-        s1s3_by_date: dict[str, tuple] = {}
+        s1s3_by_date: dict[str, tuple[Any, ...]] = {}
+        s1_orbit_by_date: dict[str, str] = {}
+        s3_orbit_by_date: dict[str, str] = {}
+        raw_id_s1: Optional[int] = None
+        raw_id_s3: Optional[int] = None
+
+        s1s3_api_dates = list(s1s3_fetch_dates)
+        if skip_existing and iid and s1s3_api_dates:
+            s1s3_api_dates = [
+                ad
+                for ad in s1s3_fetch_dates
+                if not (
+                    indices_row_exists(
+                        self.db,
+                        "S1",
+                        location_id=location_id,
+                        season_id=self.season_id,
+                        internal_id=iid,
+                        observation_date=ad,
+                    )
+                    and indices_row_exists(
+                        self.db,
+                        "S3",
+                        location_id=location_id,
+                        season_id=self.season_id,
+                        internal_id=iid,
+                        observation_date=ad,
+                    )
+                )
+            ]
+            skipped_days = len(s1s3_fetch_dates) - len(s1s3_api_dates)
+            if skipped_days:
+                logger.info(
+                    "%s: S1/S3 skip %d/%d days already in DB; fetching %d",
+                    file_name,
+                    skipped_days,
+                    len(s1s3_fetch_dates),
+                    len(s1s3_api_dates),
+                )
 
         if s1s3_fetch_dates and not should_skip_stage(
             self.db, self.run_id, file_name, Stage.INDICES_S1, resume=self.resume
         ):
-            with ThreadPoolExecutor(max_workers=min(MAX_S1_S3_WORKERS, len(s1s3_fetch_dates))) as ex:
-                futs = {ex.submit(_polygon_mean_s1_s3, geojson, ad): ad for ad in s1s3_fetch_dates}
-                for fut in as_completed(futs):
-                    ad = futs[fut]
-                    for attempt in range(FAILED_DAY_RETRY):
-                        try:
-                            s1s3_by_date[ad] = fut.result()
-                            break
-                        except Exception as e:
-                            if attempt + 1 >= FAILED_DAY_RETRY:
-                                logger.warning("S1/S3 failed date=%s: %s", ad, e)
-                                s1s3_by_date[ad] = (None,) * 6
-                            time.sleep(API_RETRY_BASE_SEC)
+            if s1s3_api_dates or not (skip_existing and iid):
+                s1s3_by_date, s1_orbit_by_date, s3_orbit_by_date, raw_id_s1, raw_id_s3 = (
+                    self._fetch_s1s3_calendar(
+                        geojson=geojson,
+                        file_name=file_name,
+                        location_id=location_id,
+                        start_str=start_str,
+                        end_str=end_str,
+                        calendar_dates=calendar_dates,
+                        s1s3_fetch_dates=s1s3_fetch_dates,
+                        iid=iid,
+                        grower_name=grower_name,
+                        grower_id=grower_id,
+                    )
+                )
 
         db_dates: set[str] = set()
         s1s3_written: set[str] = set()
@@ -608,6 +892,10 @@ class SatelliteIngestionOrchestrator:
                 grower_id=grower_id,
                 skip_existing=skip_existing,
                 counts=counts,
+                orbit_direction_s1=s1_orbit_by_date.get(ad),
+                orbit_direction_s3=s3_orbit_by_date.get(ad),
+                raw_id_s1=raw_id_s1,
+                raw_id_s3=raw_id_s3,
             ):
                 s1s3_written.add(ad)
 
@@ -633,6 +921,10 @@ class SatelliteIngestionOrchestrator:
                     grower_id=grower_id,
                     skip_existing=skip_existing,
                     counts=counts,
+                    orbit_direction_s1=s1_orbit_by_date.get(ad),
+                    orbit_direction_s3=s3_orbit_by_date.get(ad),
+                    raw_id_s1=raw_id_s1,
+                    raw_id_s3=raw_id_s3,
                 ):
                     s1s3_written.add(ad)
                 try:
@@ -648,7 +940,18 @@ class SatelliteIngestionOrchestrator:
             statistical_dates=stat_dates,
         )
         wrote_data = counts["s2"] + counts["s1"] + counts["s3"] > 0
-        if counts["errors"] == 0 and wrote_data:
+        s2_already_complete = bool(s2_observation_dates) and all(
+            sentinel2_row_exists(
+                self.db,
+                location_id,
+                file_name,
+                ad,
+                self.season_id,
+                internal_id=iid,
+            )
+            for ad in s2_observation_dates
+        )
+        if counts["errors"] == 0 and (wrote_data or s2_already_complete):
             upsert_checkpoint(
                 self.db,
                 run_id=self.run_id,
@@ -657,6 +960,13 @@ class SatelliteIngestionOrchestrator:
                 status=CheckpointStatus.DONE,
                 location_id=location_id,
             )
+            if not wrote_data and s2_already_complete:
+                logger.info(
+                    "%s: all %d S2 days already in DB — marked COMPLETE (skipped=%d)",
+                    file_name,
+                    len(s2_observation_dates),
+                    counts["skipped"],
+                )
         elif counts["errors"] == 0 and not wrote_data:
             logger.warning(
                 "No index rows written for %s — COMPLETE checkpoint not set (safe to re-run)",

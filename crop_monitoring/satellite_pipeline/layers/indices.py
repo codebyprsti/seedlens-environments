@@ -9,7 +9,11 @@ from typing import Any, Optional
 import numpy as np
 
 from crop_monitoring.sar_calculator import compute_sar_metrics
-from crop_monitoring.satellite_pipeline.bands import MANIFESTS, PIPELINE_VERSION
+from crop_monitoring.satellite_pipeline.bands import MANIFESTS, PIPELINE_VERSION, band_column_name
+from crop_monitoring.satellite_pipeline.crop_indices_columns import (
+    map_s2_bands_to_crop,
+    normalize_s1_scatter_fields,
+)
 from crop_monitoring.satellite_pipeline.index_registry import (
     compute_s2_extras,
     cross_pol_ratio,
@@ -22,8 +26,8 @@ from crop_monitoring.temperature_calculator import lst_kelvin
 def _missing_bands(row: dict, expected: tuple[str, ...]) -> list[str]:
     missing = []
     for b in expected:
-        col = b.lower().replace("b8a", "b8a")
-        v = row.get(col) or row.get(f"SENT2_{b}")
+        col = band_column_name(b)
+        v = row.get(col) or row.get(b.lower()) or row.get(f"SENT2_{b}")
         if v is None or (isinstance(v, float) and not np.isfinite(v)):
             missing.append(b)
     return missing
@@ -57,6 +61,7 @@ def build_sentinel2_record(
     grower_name: Optional[str] = None,
     grower_id: Optional[str] = None,
 ) -> dict[str, Any]:
+    merged = map_s2_bands_to_crop(merged)
     api_sources = merge_api_index_sources(merged)
     extras, miss_calc, comp_sources = compute_s2_extras(merged)
     index_sources = {**api_sources, **comp_sources}
@@ -73,18 +78,18 @@ def build_sentinel2_record(
         "max_cloud_cover_pct": max_cloud_cover_pct,
         "scene_cloud_cover_pct": merged.get("scene_cloud_cover_pct"),
         "valid_pixel_fraction": merged.get("valid_pixel_fraction"),
-        "b01": merged.get("b01"),
-        "b02": merged.get("b02"),
-        "b03": merged.get("b03"),
-        "b04": merged.get("b04"),
-        "b05": merged.get("b05"),
-        "b06": merged.get("b06"),
-        "b07": merged.get("b07"),
-        "b08": merged.get("b08"),
-        "b8a": merged.get("b8a"),
-        "b09": merged.get("b09"),
-        "b11": merged.get("b11"),
-        "b12": merged.get("b12"),
+        "coastal": merged.get("coastal") or merged.get("b01"),
+        "blue": merged.get("blue") or merged.get("b02"),
+        "green": merged.get("green") or merged.get("b03"),
+        "red": merged.get("red") or merged.get("b04"),
+        "rededge1": merged.get("rededge1") or merged.get("b05"),
+        "rededge2": merged.get("rededge2") or merged.get("b06"),
+        "rededge3": merged.get("rededge3") or merged.get("b07"),
+        "nir": merged.get("nir") or merged.get("b08"),
+        "narrow_nir": merged.get("narrow_nir") or merged.get("b8a"),
+        "cirrus": merged.get("cirrus") or merged.get("b09"),
+        "swir1": merged.get("swir1") or merged.get("b11"),
+        "swir2": merged.get("swir2") or merged.get("b12"),
         "ndvi": merged.get("ndvi") or merged.get("NDVI"),
         "savi": merged.get("savi") or merged.get("SAVI"),
         "msavi": merged.get("msavi") or merged.get("MSAVI"),
@@ -157,7 +162,8 @@ def build_sentinel1_record(
     if vh_mean is None:
         bands_missing.append("VH")
 
-    return {
+    return normalize_s1_scatter_fields(
+        {
         "location_id": location_id,
         "file_name": file_name,
         "season_id": season_id,
@@ -175,7 +181,8 @@ def build_sentinel1_record(
         "pipeline_version": PIPELINE_VERSION,
         "observation_date": acquisition_date,
         **_field_meta(internal_id=internal_id, grower_name=grower_name, grower_id=grower_id),
-    }
+        }
+    )
 
 
 def build_sentinel3_record(

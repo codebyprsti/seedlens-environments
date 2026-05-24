@@ -13,6 +13,8 @@ COMMENT ON COLUMN operations.crop_indices.extracted_village IS 'Village name fro
 
 -- Unique constraint: one observation per (location_id, start_date, variety_id, file_name)
 -- Use date_start as start_date; create unique index only if column exists.
+-- Prefer sql/alter_crop_indices_unique_natural_key.sql: date_start can collide across Sentinel buckets;
+-- the pipeline now sets date_start = analysis_date and keys uniqueness on analysis_date + file_name.
 DO $$
 BEGIN
   IF EXISTS (

@@ -18,7 +18,14 @@ logs/
 demo_outputs/
 test_outputs/
 output/
-data/
+# Satellite deployment data (keep README/.gitkeep; ignore large KML/raw)
+data/kml/harvest_all_fields/*.kml
+data/raw_cache/**
+!data/**/README.md
+!data/**/.gitkeep
+checkpoints/satellite/*.json
+checkpoints/satellite/*.txt
+reports/harvest/**
 
 # Editor / IDE
 .vscode/

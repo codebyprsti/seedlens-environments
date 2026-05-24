@@ -1,0 +1,85 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"village": "Kompally", "district": "Medchal-Malkajgiri", "state": "Telangana"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[78.48, 17.52], [78.49, 17.52], [78.49, 17.51], [78.48, 17.51], [78.48, 17.52]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"village": "Dundigal", "district": "Medchal-Malkajgiri", "state": "Telangana"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[78.46, 17.51], [78.47, 17.51], [78.47, 17.50], [78.46, 17.50], [78.46, 17.51]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"village": "Bachupally", "district": "Medchal-Malkajgiri", "state": "Telangana"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[78.38, 17.54], [78.40, 17.54], [78.40, 17.52], [78.38, 17.52], [78.38, 17.54]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"village": "Keesara", "district": "Medchal-Malkajgiri", "state": "Telangana"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[78.52, 17.48], [78.54, 17.48], [78.54, 17.46], [78.52, 17.46], [78.52, 17.48]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"village": "Ghatkesar", "district": "Medchal-Malkajgiri", "state": "Telangana"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[78.68, 17.45], [78.70, 17.45], [78.70, 17.43], [78.68, 17.43], [78.68, 17.45]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"village": "Uppal", "district": "Medchal-Malkajgiri", "state": "Telangana"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[78.56, 17.40], [78.58, 17.40], [78.58, 17.38], [78.56, 17.38], [78.56, 17.40]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"village": "Medchal", "district": "Medchal-Malkajgiri", "state": "Telangana"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[78.42, 17.62], [78.44, 17.62], [78.44, 17.60], [78.42, 17.60], [78.42, 17.62]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"village": "Alwal", "district": "Medchal-Malkajgiri", "state": "Telangana"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[78.50, 17.50], [78.52, 17.50], [78.52, 17.48], [78.50, 17.48], [78.50, 17.50]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"village": "Malkajgiri", "district": "Medchal-Malkajgiri", "state": "Telangana"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[78.52, 17.44], [78.54, 17.44], [78.54, 17.42], [78.52, 17.42], [78.52, 17.44]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"village": "Quthbullapur", "district": "Medchal-Malkajgiri", "state": "Telangana"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[78.44, 17.50], [78.46, 17.50], [78.46, 17.48], [78.44, 17.48], [78.44, 17.50]]]
+      }
+    }
+  ]
+}

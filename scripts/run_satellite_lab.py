@@ -5,6 +5,7 @@ Lab/server entry point for full harvest satellite v2 deployment (253 KMLs).
   python scripts/run_satellite_lab.py bootstrap --install-deps
   python scripts/run_satellite_lab.py validate
   python scripts/run_satellite_lab.py run --start 2025-12-01 --end 2026-03-18
+  python scripts/run_satellite_lab.py run --continue-last-run --maxcc 20 --start ... --end ...
   python scripts/run_satellite_lab.py run --resume-failed --start ... --end ...
   python scripts/run_satellite_lab.py reprocess --start 2025-12-01 --end 2026-03-18
 """
@@ -75,7 +76,33 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     return bootstrap_main(argv)
 
 
+def _reload_env() -> None:
+    """Ensure .env is loaded before validate/run (core.settings caches on first import)."""
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(_root / ".env", override=True)
+    except ImportError:
+        pass
+    import os
+
+    try:
+        from importlib import reload
+
+        import core.config as cc
+
+        reload(cc)
+        s = cc.settings
+        if s.SH_CLIENT_ID:
+            os.environ["SH_CLIENT_ID"] = s.SH_CLIENT_ID
+        if s.SH_CLIENT_SECRET:
+            os.environ["SH_CLIENT_SECRET"] = s.SH_CLIENT_SECRET
+    except Exception:
+        pass
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
+    _reload_env()
     from satellite_deployment.validate import run_all_checks
 
     paths = _paths()
@@ -105,6 +132,7 @@ def cmd_migrate(_args: argparse.Namespace) -> int:
 
 
 def _run_config(args: argparse.Namespace, *, mode: str) -> int:
+    _reload_env()
     from satellite_deployment.logging_setup import setup_deployment_logging
     from satellite_deployment.runner import HarvestDeploymentRunner, RunConfig
 
@@ -130,6 +158,7 @@ def _run_config(args: argparse.Namespace, *, mode: str) -> int:
         batch_strategy=args.batch_strategy,
         resume=not args.no_resume,
         use_stac=not args.no_stac,
+        s1_s3_on_s2_days_only=getattr(args, "s1_s3_on_s2_days_only", False),
         max_cloud_cover=args.maxcc,
         api_delay_seconds=args.api_delay,
         max_retries_per_field=args.max_retries,
@@ -139,6 +168,7 @@ def _run_config(args: argparse.Namespace, *, mode: str) -> int:
         run_id=run_id,
         validate_only=args.validate_only,
         dry_run=args.dry_run,
+        continue_last_run=getattr(args, "continue_last_run", False),
     )
     return runner.run(cfg, resume_failed_only=getattr(args, "resume_failed", False))
 
@@ -176,12 +206,18 @@ def main() -> int:
         p.add_argument("--end", type=str)
         p.add_argument("--season-id", type=str, default="RABI_25_26")
         p.add_argument("--batch-strategy", default="quarterly")
-        p.add_argument("--maxcc", type=float, default=None)
+        p.add_argument("--maxcc", type=float, default=20.0, help="Max scene cloud %% (default 20)")
         p.add_argument("--limit", type=int, default=None)
         p.add_argument("--only-internal-id", action="append", default=None)
         p.add_argument("--no-resume", action="store_true")
+        p.add_argument("--continue-last-run", action="store_true", help="Reuse run_id from checkpoints; skip COMPLETE fields")
         p.add_argument("--resume-failed", action="store_true")
         p.add_argument("--no-stac", action="store_true")
+        p.add_argument(
+            "--s1-s3-on-s2-days-only",
+            action="store_true",
+            help="Fetch S1/S3 only on S2 observation days (~20) not every calendar day (~108); saves PU",
+        )
         p.add_argument("--validate-only", action="store_true")
         p.add_argument("--dry-run", action="store_true")
         p.add_argument("--run-id", type=str, default=None)

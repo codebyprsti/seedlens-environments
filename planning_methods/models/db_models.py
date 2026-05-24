@@ -57,7 +57,7 @@ class CropRecord(Base):
     # Relationships
     category = relationship("CategoryRecord", back_populates="crops")
     varieties = relationship("VarietyRecord", back_populates="crop")
-    inspections = relationship("SeasonCropInspectionBase", back_populates="crop")
+    inspections = relationship("SeasonCropInspectionBase", back_populates="crop_record")
 
 
 class VarietyRecord(Base):
@@ -409,9 +409,13 @@ class SeasonCropInspectionBase(Base):
 
     # Relationships
     # category = relationship("CategoryRecord", back_populates="inspections")
-    crop = relationship("CropRecord", back_populates="inspections")
-    variety = relationship("VarietyRecord", back_populates="inspections")
-    location = relationship("LocationRecord", back_populates="inspections")
+    crop_record = relationship(
+        "CropRecord",
+        back_populates="inspections",
+        foreign_keys=[crop_id],
+    )
+    variety = relationship("VarietyRecord", back_populates="inspections", foreign_keys=[variety_id])
+    location = relationship("LocationRecord", back_populates="inspections", foreign_keys=[location_id])
     grower = relationship("GrowerRecord", back_populates="inspections")
     organizer = relationship("OrganizerRecord", back_populates="inspections")
 

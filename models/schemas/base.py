@@ -538,6 +538,195 @@ class YieldSummaryResponse(BaseModel):
     avg_productivity: Optional[float]
     forecast_1: Optional[float]
     forecast_2: Optional[float]
+    # Planning (plan vs actual)
+    plan_revision_version: Optional[str] = None
+    net_acres_current: Optional[float] = None
+    productivity: Optional[float] = None  # plan productivity
+    production_allocation: Optional[float] = None
+    actual_net_acres: Optional[float] = None
+    adjusted_production_allocation: Optional[float] = None
+    estimated_cost_per_kg: Optional[float] = None
+    estimated_production_cost: Optional[float] = None
+    actual_received_qty: Optional[float] = None
+    actual_amount: Optional[float] = None
+    actual_packaged_qty: Optional[float] = None
+    actual_productivity: Optional[float] = None
+
+
+# --- Plan vs Yield Forecast View APIs (operations.plan_vs_yield_forecast_view) ---
+
+
+class PlanVsYieldSummaryRow(BaseModel):
+    """Aggregated row from plan_vs_yield_forecast_view grouped by season_id, crop_id, variety_id, location_id."""
+    season_id: Optional[str] = None
+    crop_id: Optional[str] = None
+    variety_id: Optional[str] = None
+    location_id: Optional[str] = None
+    planned_net_acres: Optional[float] = None
+    actual_net_acres: Optional[float] = None
+    planned_production_allocation: Optional[float] = None
+    actual_received_qty: Optional[float] = None
+    actual_packed_qty: Optional[float] = None
+    planned_productivity: Optional[float] = None
+    actual_productivity: Optional[float] = None
+    actual_amount: Optional[float] = None
+    stage_forecast1: Optional[float] = None
+    stage_forecast2: Optional[float] = None
+    stage_forecast3: Optional[float] = None
+    stage_forecast4: Optional[float] = None
+    stage_forecast5: Optional[float] = None
+    stage_forecast6: Optional[float] = None
+    qty_variance: Optional[float] = None  # actual_received_qty - planned_production_allocation
+    productivity_variance: Optional[float] = None  # actual_productivity - planned_productivity
+
+
+class PlanVsYieldInspectionRow(BaseModel):
+    """Lot-level row from plan_vs_yield_forecast_view (all view columns for UI)."""
+    season_name: Optional[str] = None
+    crop_name: Optional[str] = None
+    variety_name: Optional[str] = None
+    village: Optional[str] = None
+    mandal: Optional[str] = None
+    district: Optional[str] = None
+    state: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    plan_revision_version: Optional[str] = None
+    planned_net_acres: Optional[float] = None
+    planned_productivity: Optional[float] = None
+    planned_production_allocation: Optional[float] = None
+    actual_net_acres: Optional[float] = None
+    actual_tp_acres: Optional[float] = None
+    actual_received_qty: Optional[float] = None
+    actual_packed_qty: Optional[float] = None
+    actual_productivity: Optional[float] = None
+    actual_amount: Optional[float] = None
+    adjusted_production_allocation: Optional[float] = None
+    estimated_cost_per_kg: Optional[float] = None
+    estimated_production_cost: Optional[float] = None
+    stage_forecast1: Optional[float] = None
+    stage_forecast2: Optional[float] = None
+    stage_forecast3: Optional[float] = None
+    stage_forecast4: Optional[float] = None
+    stage_forecast5: Optional[float] = None
+    stage_forecast6: Optional[float] = None
+
+
+class MetaInfo(BaseModel):
+    count: int
+    execution_time_ms: float
+
+
+class PlanVsYieldSummaryResponse(BaseModel):
+    filters: Dict[str, Any] = {}
+    summary: Dict[str, Any] = {}
+    rows: List[PlanVsYieldSummaryRow] = []
+    meta: MetaInfo
+
+
+class PlanVsYieldInspectionResponse(BaseModel):
+    filters: Dict[str, Any] = {}
+    summary: Dict[str, Any] = {}
+    rows: List[PlanVsYieldInspectionRow] = []
+    meta: MetaInfo
+
+
+class YieldFiltersResponse(BaseModel):
+    """Distinct values for dropdown filters. Location hierarchy: State → District → Village."""
+    seasons: List[Dict[str, str]] = []
+    crops: List[Dict[str, str]] = []
+    varieties: List[Dict[str, str]] = []
+    locations: List[Dict[str, str]] = []
+    states: List[str] = []
+    districts: List[str] = []
+    villages: List[str] = []
+
+
+class SeasonUpdateRequest(BaseModel):
+    season_name: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    description: Optional[str] = None
+    is_default: Optional[bool] = None
+    status: Optional[bool] = None
+
+
+class SeasonResponse(BaseModel):
+    season_id: str
+    season_name: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    description: Optional[str] = None
+    is_default: Optional[bool] = None
+    status: Optional[bool] = None
+    create_date: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SeasonUpdateResponse(BaseModel):
+    season_id: str
+    season_name: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    description: Optional[str] = None
+    is_default: Optional[bool] = None
+    status: Optional[bool] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SeasonListResponse(BaseModel):
+    data: List[SeasonResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class CropUpdateRequest(BaseModel):
+    crop_name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class CropResponse(BaseModel):
+    crop_id: str
+    crop_name: Optional[str] = None
+    description: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CropListResponse(BaseModel):
+    data: List[CropResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class VarietyUpdateRequest(BaseModel):
+    variety_name: Optional[str] = None
+    crop_id: Optional[str] = None
+    description: Optional[str] = None
+
+
+class VarietyResponse(BaseModel):
+    variety_id: str
+    variety_name: Optional[str] = None
+    crop_id: Optional[str] = None
+    description: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class VarietyListResponse(BaseModel):
+    data: List[VarietyResponse]
+    total: int
+    limit: int
+    offset: int
 
 class SeedForecastBase(BaseModel):
     grower_id: str

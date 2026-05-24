@@ -147,7 +147,16 @@ def test_copernicus_auth() -> ValidationResult:
             pass
         from sentinelhub import SentinelHubSession
 
-        session = SentinelHubSession()
+        from crop_monitoring.statistical_client import _get_config
+
+        config = _get_config()
+        if not (config.sh_client_id or "").strip() or not (config.sh_client_secret or "").strip():
+            r.fail(
+                "SH_CLIENT_ID / SH_CLIENT_SECRET not set. Add them to "
+                f"{os.environ.get('SATELLITE_PROJECT_ROOT', '.')}/.env on the lab machine."
+            )
+            return r
+        session = SentinelHubSession(config=config)
         token = session.token
         if not token:
             r.fail("Sentinel Hub session returned empty token")

@@ -390,18 +390,64 @@ def build_harvest_mappings(
             validation_status="ok" if not notes else "warning",
             validation_notes="; ".join(notes) if notes else None,
         )
+        if notes:
+            logger.warning(
+                "mapping_issue internal_id=%s disk=%s canonical_file_name=%s notes=%s grower=%s",
+                iid,
+                disk_kml_name,
+                canonical_fn,
+                ";".join(notes),
+                grower_name or "NULL",
+            )
+        else:
+            logger.debug(
+                "mapping_ok internal_id=%s disk=%s → file_name=%s grower=%s",
+                iid,
+                disk_kml_name,
+                canonical_fn,
+                grower_name,
+            )
 
     for lid in manifest:
         expected = f"{lid}.kml"
         if expected not in {p.name for p in kml_files}:
             report.warnings.append(f"Manifest entry missing KML file: {expected}")
 
+    missing_fn = [iid for iid, m in report.mappings.items() if m.file_name == m.legacy_file_name]
+    missing_grower = [iid for iid, m in report.mappings.items() if not m.grower_name]
+    unmatched_manifest = [
+        lid for lid in manifest if f"{lid}.kml" not in {p.name for p in kml_files}
+    ]
+    if report.duplicate_internal_ids:
+        logger.error("duplicate_internal_ids: %s", report.duplicate_internal_ids)
+    if missing_fn:
+        logger.warning(
+            "missing_canonical_file_name (using disk name): count=%d sample=%s",
+            len(missing_fn),
+            missing_fn[:5],
+        )
+    if missing_grower:
+        logger.warning(
+            "missing_grower_name: count=%d sample=%s",
+            len(missing_grower),
+            missing_grower[:5],
+        )
+    if unmatched_manifest:
+        logger.warning(
+            "manifest_without_kml: count=%d sample=%s",
+            len(unmatched_manifest),
+            unmatched_manifest[:5],
+        )
     logger.info(
-        "Harvest mapping: %d KMLs, %d STRINGbio loc rows, %d errors, %d warnings",
+        "Harvest mapping: %d KMLs, %d manifest, %d STRINGbio loc, "
+        "%d errors, %d warnings, %d dup_internal, %d fallback_file_name",
         len(report.mappings),
+        len(manifest),
         len(stringbio_by_loc),
         len(report.errors),
         len(report.warnings),
+        len(report.duplicate_internal_ids),
+        len(missing_fn),
     )
     return report
 

@@ -545,3 +545,61 @@ class LocationService:
                 cur.close()
             release_connection(conn)
 
+    def get_field_locations(self) -> List[Dict[str, Any]]:
+        """
+        Fetch all rows from operations.field_locations (KML-ingested locations).
+        Returns list of dicts with location_id, extracted_village, village, mandal, district,
+        state, postalcode, latitude, longitude.
+        """
+        try:
+            sql_query = text("""
+                SELECT
+                    location_id,
+                    extracted_village,
+                    village,
+                    mandal,
+                    district,
+                    state,
+                    postalcode,
+                    latitude,
+                    longitude
+                FROM operations.field_locations
+                ORDER BY location_id
+            """)
+            result_set = self.db.execute(sql_query)
+            rows = result_set.fetchall()
+            result = []
+            for row in rows:
+                result.append({
+                    "location_id": row.location_id,
+                    "extracted_village": row.extracted_village,
+                    "village": row.village,
+                    "mandal": row.mandal,
+                    "district": row.district,
+                    "state": row.state,
+                    "postalcode": row.postalcode,
+                    "latitude": safe_float(row.latitude) if row.latitude is not None else None,
+                    "longitude": safe_float(row.longitude) if row.longitude is not None else None,
+                })
+            return result
+        except Exception as e:
+            logger.error(f"Error fetching field_locations: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to fetch field locations: {str(e)}")
+
+    def get_field_locations_columns(self) -> List[Dict[str, Any]]:
+        """
+        Return column metadata for operations.field_locations API response.
+        Same structure as get_column_metadata (db_column_name, display_name, type, group_name, is_visible, is_editable, custom_order).
+        """
+        return [
+            {"db_column_name": "location_id", "display_name": "Location ID", "type": "text", "group_name": "", "is_visible": True, "is_editable": False, "custom_order": 1},
+            {"db_column_name": "extracted_village", "display_name": "Extracted Village (KML)", "type": "text", "group_name": "", "is_visible": True, "is_editable": False, "custom_order": 2},
+            {"db_column_name": "village", "display_name": "Village (Geocode)", "type": "text", "group_name": "", "is_visible": True, "is_editable": True, "custom_order": 3},
+            {"db_column_name": "mandal", "display_name": "Mandal", "type": "text", "group_name": "", "is_visible": True, "is_editable": True, "custom_order": 4},
+            {"db_column_name": "district", "display_name": "District", "type": "text", "group_name": "", "is_visible": True, "is_editable": True, "custom_order": 5},
+            {"db_column_name": "state", "display_name": "State", "type": "text", "group_name": "", "is_visible": True, "is_editable": True, "custom_order": 6},
+            {"db_column_name": "postalcode", "display_name": "Postal Code", "type": "text", "group_name": "", "is_visible": True, "is_editable": False, "custom_order": 7},
+            {"db_column_name": "latitude", "display_name": "Latitude", "type": "decimal", "group_name": "", "is_visible": True, "is_editable": False, "custom_order": 8},
+            {"db_column_name": "longitude", "display_name": "Longitude", "type": "decimal", "group_name": "", "is_visible": True, "is_editable": False, "custom_order": 9},
+        ]
+

@@ -183,37 +183,46 @@ def reprocess_file_from_raw(
         grower_name=grower_name,
         grower_id=grower_id,
     )
-    # S1/S3: reprocess from bands JSON in raw if present
-    for row in load_raw_rows(db, location_id=location_id, file_name=file_name):
-        src = row.get("source") or ""
-        bands = row.get("bands") or {}
-        if not isinstance(bands, dict):
-            continue
-        ad = row.get("observation_date")
-        if ad and not hasattr(ad, "isoformat"):
-            ad = str(ad)[:10]
-        elif hasattr(ad, "isoformat"):
-            ad = ad.isoformat()[:10]
-        else:
-            ad = None
-        if "copernicus_s1" in src and ad:
-            rec = build_sentinel1_record(
-                bands.get("vv"),
-                bands.get("vh"),
-                location_id=location_id,
-                file_name=file_name,
-                season_id=season_id,
-                acquisition_date=ad,
-                raw_observation_id=row["id"],
-                internal_id=internal_id,
-                grower_name=grower_name,
-                grower_id=grower_id,
-            )
-            if upsert_sentinel1_indices(db, rec):
-                counts["s1"] += 1
-        if "copernicus_lst" in src or "copernicus_s3" in src:
-            lst = bands.get("lst_celsius")
-            if lst is not None and ad:
+    s1_n, s3_n = reprocess_s1s3_from_raw(
+        db,
+        location_id=location_id,
+        file_name=file_name,
+        season_id=season_id,
+        internal_id=internal_id,
+        grower_name=grower_name,
+        grower_id=grower_id,
+    )
+    counts["s1"] = s1_n
+    counts["s3"] = s3_n
+    if counts["s1"] == 0 and counts["s3"] == 0:
+        for row in load_raw_rows(db, location_id=location_id, file_name=file_name):
+            src = row.get("source") or ""
+            bands = row.get("bands") or {}
+            if not isinstance(bands, dict):
+                continue
+            ad = row.get("observation_date")
+            if ad and hasattr(ad, "isoformat"):
+                ad = ad.isoformat()[:10]
+            elif ad:
+                ad = str(ad)[:10]
+            else:
+                ad = None
+            if "copernicus_s1" in src and ad and "statistical" not in src:
+                rec = build_sentinel1_record(
+                    bands.get("vv"),
+                    bands.get("vh"),
+                    location_id=location_id,
+                    file_name=file_name,
+                    season_id=season_id,
+                    acquisition_date=ad,
+                    raw_observation_id=row["id"],
+                    internal_id=internal_id,
+                    grower_name=grower_name,
+                    grower_id=grower_id,
+                )
+                if upsert_sentinel1_indices(db, rec):
+                    counts["s1"] += 1
+            if ("copernicus_lst" in src or "copernicus_s3" in src) and "statistical" not in src and ad:
                 rec = build_sentinel3_record(
                     bands.get("s7"),
                     bands.get("s8"),
@@ -230,3 +239,74 @@ def reprocess_file_from_raw(
                 if upsert_sentinel3_indices(db, rec):
                     counts["s3"] += 1
     return counts
+
+
+def reprocess_s1s3_from_raw(
+    db: Session,
+    *,
+    location_id: str,
+    file_name: str,
+    season_id: Optional[str],
+    internal_id: Optional[str] = None,
+    grower_name: Optional[str] = None,
+    grower_id: Optional[str] = None,
+    calendar_dates: Optional[list[str]] = None,
+) -> tuple[int, int]:
+    """Rebuild sentinel1/3_indices from bulk Statistical raw (no API)."""
+    from crop_monitoring.satellite_pipeline.fetch_s1_s3_statistical import load_s1s3_from_stored_raw
+    from crop_monitoring.satellite_pipeline.temporal_batch import calendar_dates_inclusive
+    from datetime import date as date_cls
+
+    s1_payload = s3_payload = None
+    raw_id_s1 = raw_id_s3 = None
+    for row in load_raw_rows(db, location_id=location_id, file_name=file_name):
+        src = row.get("source") or ""
+        if src == "copernicus_s1_statistical_v2":
+            s1_payload = row.get("raw_response")
+            raw_id_s1 = row.get("id")
+        elif src == "copernicus_s3_statistical_v2":
+            s3_payload = row.get("raw_response")
+            raw_id_s3 = row.get("id")
+
+    if not s1_payload or not s3_payload:
+        return 0, 0
+
+    if calendar_dates is None:
+        meta = s1_payload if isinstance(s1_payload, dict) else {}
+        interval = meta.get("interval") or ["2025-12-01", "2026-03-18"]
+        calendar_dates = calendar_dates_inclusive(
+            date_cls.fromisoformat(str(interval[0])[:10]),
+            date_cls.fromisoformat(str(interval[1])[:10]),
+        )
+
+    s1s3_by_date = load_s1s3_from_stored_raw(s1_payload, s3_payload, calendar_dates)
+    s1_n = s3_n = 0
+    for ad in calendar_dates:
+        s7, s8, s9, _lst, vv, vh = s1s3_by_date.get(ad, (None,) * 6)
+        s1_rec = build_sentinel1_record(
+            vv, vh,
+            location_id=location_id,
+            file_name=file_name,
+            season_id=season_id,
+            acquisition_date=ad,
+            raw_observation_id=raw_id_s1,
+            internal_id=internal_id,
+            grower_name=grower_name,
+            grower_id=grower_id,
+        )
+        if upsert_sentinel1_indices(db, s1_rec):
+            s1_n += 1
+        s3_rec = build_sentinel3_record(
+            s7, s8, s9,
+            location_id=location_id,
+            file_name=file_name,
+            season_id=season_id,
+            acquisition_date=ad,
+            raw_observation_id=raw_id_s3,
+            internal_id=internal_id,
+            grower_name=grower_name,
+            grower_id=grower_id,
+        )
+        if upsert_sentinel3_indices(db, s3_rec):
+            s3_n += 1
+    return s1_n, s3_n

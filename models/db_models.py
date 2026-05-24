@@ -1,18 +1,17 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Float, Boolean, Text, Index, Date, Numeric
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Float, Boolean, Text, Index, Date, Numeric, PrimaryKeyConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import create_engine
-from urllib.parse import quote_plus
+"""
+DB models for SQLAlchemy.
 
-password = quote_plus("Prstilabdb1@")
+Security: do not hardcode credentials here. Reuse the central engine from `core.db`.
+"""
 
+from core.db import engine  # Centralized engine (configured via core.config/.env)
 
 Base = declarative_base()
-engine = create_engine(
-    f"postgresql://madanm:{password}@127.0.0.1:5432/test_seedworks_db"
-)
 
 class CategoryRecord(Base):
     __tablename__ = "categories"
@@ -65,7 +64,7 @@ class CropRecord(Base):
     # Relationships
     category = relationship("CategoryRecord", back_populates="crops")
     varieties = relationship("VarietyRecord", back_populates="crop")
-    inspections = relationship("SeasonCropInspectionBase", back_populates="crop")
+    inspections = relationship("SeasonCropInspectionBase", back_populates="crop_record")
 
 
 class VarietyRecord(Base):
@@ -106,29 +105,30 @@ class LocationRecord(Base):
     # Relationships
     category = relationship("CategoryRecord", back_populates="locations")
     inspections = relationship("SeasonCropInspectionBase", back_populates="location")
-    polygon = relationship("LocationPolygonRecord", back_populates="location", uselist=False)
+    polygons = relationship("LocationPolygonRecord", back_populates="location", uselist=True)
+    polygon = relationship("LocationPolygonRecord", back_populates="location", uselist=False, viewonly=True)
 
 
 class LocationPolygonRecord(Base):
     __tablename__ = "location_polygons"
-    __table_args__ = {'schema': 'operations'}
+    __table_args__ = (
+        PrimaryKeyConstraint('location_id', 'polygon_index', name='location_polygons_pkey'),
+        {'schema': 'operations'},
+    )
 
-    location_id = Column(String(20), ForeignKey("operations.locations.location_id", ondelete="CASCADE"), 
-                         primary_key=True, nullable=False, index=True)
+    location_id = Column(String(20), ForeignKey("operations.locations.location_id", ondelete="CASCADE"), nullable=False, index=True)
+    polygon_index = Column(Integer, nullable=False, default=0)
     village = Column(String(100), nullable=False)
     mandal = Column(String(100))
     district = Column(String(100), nullable=False)
     state = Column(String(100))
-    # Note: polygon_geom is stored as PostGIS geometry type
-    # For SQLAlchemy, we'll use Text to store GeoJSON, or use geoalchemy2 if available
-    # In practice, geometry operations should be done via raw SQL with PostGIS functions
-    polygon_geom = Column(Text, nullable=False)  # Stores GeoJSON string, converted to PostGIS geometry via SQL
+    polygon_geom = Column(Text, nullable=False)
+    polygon_geojson = Column(Text, nullable=True)
     source = Column(String(50), nullable=False, default='bhuvan')
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
-    # Relationships
-    location = relationship("LocationRecord", back_populates="polygon")
+    location = relationship("LocationRecord", back_populates="polygons")
 
 
 class GrowerRecord(Base):
@@ -354,6 +354,12 @@ class SupplyChainPlanning(Base):
     adjusted_production_allocation = Column(Numeric(10, 2))
     estimated_cost_per_kg = Column(Numeric(10, 2))
     estimated_production_cost = Column(Numeric(12, 2))
+    # Actuals (for plan vs actual comparison)
+    actual_net_acres = Column(Numeric(10, 2), nullable=True)
+    actual_received_qty = Column(Numeric(12, 2), nullable=True)
+    actual_amount = Column(Numeric(14, 2), nullable=True)
+    actual_packaged_qty = Column(Numeric(12, 2), nullable=True)
+    actual_productivity = Column(Numeric(10, 2), nullable=True)
     category_id = Column(Integer)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -414,69 +420,48 @@ class SeasonCropInspectionBase(Base):
     grower = relationship("GrowerRecord", back_populates="inspections")
     organizer = relationship("OrganizerRecord", back_populates="inspections")
 
-
 class YieldRecord(Base):
     __tablename__ = "season_crop_yield"
-    __table_args__ = {'schema': 'operations'}
+    __table_args__ = (
+        PrimaryKeyConstraint("season_id", "crop_id", "variety_id", "lot_id"),
+        {"schema": "operations"},
+    )
 
-    id = Column(Integer, primary_key=True, index=True)
-
-    # Foreign Key Identifiers
-    season_id = Column(String(50), nullable=True)
-    crop_id = Column(String(50),nullable=True)
-    variety_id = Column(String(50),  nullable=True)
+    season_id = Column(String(50), nullable=False)
+    crop_id = Column(String(50), nullable=False)
+    variety_id = Column(String(50), nullable=False)
+    lot_id = Column(String(100), nullable=False)
+    location_id = Column(String(50), nullable=True)
     grower_id = Column(String(50), nullable=True)
-    lot_id = Column(String(100), nullable=True)
-
-    # Yield-specific fields
-    physical_received_qty_as_per_sap = Column(Float, nullable=True)
+    organizer_id = Column(String(50), nullable=True)
     m1_soaking_date = Column(Date, nullable=True)
-    m1_soaking_slab = Column(String(100), nullable=True)
+    m1_soaking_week = Column(String(50), nullable=True)
     female_soaking_date = Column(Date, nullable=True)
-    female_tp_date = Column(Date, nullable=True)
-
+    female_date_of_transplant = Column(Date, nullable=True)
+    po_soaking_acres = Column(Float, nullable=True)
+    planting_list_soaking_acres = Column(Float, nullable=True)
     sowing_acres = Column(Float, nullable=True)
     net_tp_acres = Column(Float, nullable=True)
-    net_acerage_area = Column(Float, nullable=True)
+    net_acreage_area = Column(Float, nullable=True)
     final_harvestable_area = Column(Float, nullable=True)
-
-    sum_of_received_raw_qty = Column(Float, nullable=True)
+    sum_of_received_qty = Column(Float, nullable=True)
+    packed_qty = Column(Float, nullable=True)
+    productivity_of_packed_seed = Column(Float, nullable=True)
+    yield_slab = Column(String(50), nullable=True)
     qty = Column(Float, nullable=True)
     rate_per_kg = Column(Float, nullable=True)
     amount_inr = Column(Float, nullable=True)
-
-    productivity_of_packed_seed = Column(Float, nullable=True)
-    packed_qt = Column(Float, nullable=True)
-    productvity = Column(Float, nullable=True)
-
-    slab = Column(String(50), nullable=True)
-    pos_done_b = Column(String(100), nullable=True)
-    production_manager = Column(String(100), nullable=True)
-    production_plant = Column(String(100), nullable=True)
-    production_location = Column(String(100), nullable=True)
-    production_co = Column(String(100), nullable=True)
-
-    po_soaking_acres = Column(Float, nullable=True)
-    purchase_order = Column(String(100), nullable=True)
-    planting_list_soaking_acres = Column(Float, nullable=True)
-    net_acres = Column(Float, nullable=True)
-
+    male_parent_seed_lot_no = Column(String(100), nullable=True)
+    male_soaking_acre = Column(Float, nullable=True)
+    male_no_of_pkt = Column(Float, nullable=True)
+    male_qty_in_kgs = Column(Float, nullable=True)
+    female_parent_seed_lot_no = Column(String(100), nullable=True)
+    female_soaking_acre = Column(Float, nullable=True)
+    female_no_of_pkt = Column(Float, nullable=True)
+    female_qty_in_kgs = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
     tp_days = Column(Integer, nullable=True)
-    tp_days_slab = Column(String(50), nullable=True)
-
-    # Audit fields
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # Relationships
-    # crop = relationship("CropRecord", back_populates="yields")
-    # variety = relationship("VarietyRecord", back_populates="yields")
-    # location = relationship("LocationRecord", back_populates="yields")
-    # grower = relationship("GrowerRecord", back_populates="yields")
-    # organizer = relationship("OrganizerRecord", back_populates="yields")
-
-    # def __repr__(self):
-    #     return f"<YieldRecord(grower_id={self.grower_id}, crop_id={self.crop_id}, lot_id={self.lot_id})>"
 
 
 class YieldInspectionView(Base):
@@ -490,7 +475,6 @@ class YieldInspectionView(Base):
     variety_id = Column(String, primary_key=True)
     variety_name = Column(String)
     village = Column(String)
-    state = Column(String)
     grower_name = Column(String)
     lot_id = Column(String)
     grower_id = Column(String)
@@ -531,6 +515,52 @@ class SeedForecast(Base):
     stage_forecast5 = Column(Float)
     stage_forecast6 = Column(Float)
 
+
+class PlanVsYieldForecastView(Base):
+    """
+    Read-only model for operations.plan_vs_yield_forecast_view.
+    View: season_crop_yield + supply_chain_planning (on season/crop/variety/location_id) +
+    seed_forecast (lot) + seasons, crops, varieties, locations.
+    """
+    __tablename__ = "plan_vs_yield_forecast_view"
+    __table_args__ = (
+        PrimaryKeyConstraint("season_id", "crop_id", "variety_id", "lot_id", name="plan_vs_yield_forecast_view_pk"),
+        {"schema": "operations"},
+    )
+
+    season_id = Column(String(50))
+    crop_id = Column(String(50))
+    variety_id = Column(String(50))
+    lot_id = Column(String(100))
+    location_id = Column(String(50))
+    season_name = Column(String(100))
+    crop_name = Column(String(100))
+    variety_name = Column(String(100))
+    village = Column(String(200))
+    mandal = Column(String(200))
+    district = Column(String(200))
+    state = Column(String(100))
+    latitude = Column(Float)
+    longitude = Column(Float)
+    plan_revision_version = Column(String(50))
+    planned_net_acres = Column(Float)
+    planned_productivity = Column(Float)
+    planned_production_allocation = Column(Float)
+    actual_net_acres = Column(Float)
+    actual_tp_acres = Column(Float)
+    adjusted_production_allocation = Column(Float)
+    estimated_cost_per_kg = Column(Float)
+    estimated_production_cost = Column(Float)
+    actual_received_qty = Column(Float)
+    actual_packed_qty = Column(Float)
+    actual_productivity = Column(Float)
+    actual_amount = Column(Float)
+    stage_forecast1 = Column(Float)
+    stage_forecast2 = Column(Float)
+    stage_forecast3 = Column(Float)
+    stage_forecast4 = Column(Float)
+    stage_forecast5 = Column(Float)
+    stage_forecast6 = Column(Float)
 
 
 # Create tables

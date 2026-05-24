@@ -33,6 +33,7 @@ class RunConfig:
     batch_strategy: str = "quarterly"
     resume: bool = True
     use_stac: bool = True
+    s1_s3_on_s2_days_only: bool = False
     max_cloud_cover: Optional[float] = None
     api_delay_seconds: float = 2.0
     max_retries_per_field: int = 2
@@ -43,6 +44,7 @@ class RunConfig:
     run_id: Optional[uuid.UUID] = None
     validate_only: bool = False
     dry_run: bool = False
+    continue_last_run: bool = False
 
 
 class HarvestDeploymentRunner:
@@ -87,6 +89,16 @@ class HarvestDeploymentRunner:
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
+    def _load_last_run_id(self) -> Optional[uuid.UUID]:
+        if not self.state_path.is_file():
+            return None
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+            rid = state.get("run_id")
+            return uuid.UUID(str(rid)) if rid else None
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return None
+
     def build_mappings(self, db):
         from crop_monitoring.satellite_pipeline.harvest_field_mapping import (
             build_harvest_mappings,
@@ -108,7 +120,14 @@ class HarvestDeploymentRunner:
         )
 
         self.paths.ensure_runtime_dirs()
-        run_id = config.run_id or uuid.uuid4()
+        explicit_run_id = config.run_id
+        run_id = explicit_run_id
+        if config.continue_last_run and run_id is None:
+            run_id = self._load_last_run_id()
+            if run_id:
+                logger.info("Continuing previous run_id=%s", run_id)
+        if run_id is None:
+            run_id = uuid.uuid4()
 
         from core.db import SessionLocal
 
@@ -157,6 +176,19 @@ class HarvestDeploymentRunner:
             if failed:
                 items = [m for m in items if m.internal_id in failed]
                 logger.info("Resume-failed mode: %d fields", len(items))
+        elif config.resume and (config.continue_last_run or explicit_run_id is not None):
+            from crop_monitoring.satellite_pipeline.checkpoint import list_complete_file_names
+
+            done_names = list_complete_file_names(db, run_id)
+            if done_names:
+                before = len(items)
+                items = [m for m in items if m.file_name not in done_names]
+                logger.info(
+                    "Skipping %d complete fields; %d remaining for run_id=%s",
+                    before - len(items),
+                    len(items),
+                    run_id,
+                )
         if config.limit:
             items = items[: config.limit]
 
@@ -206,6 +238,7 @@ class HarvestDeploymentRunner:
             batch_strategy=config.batch_strategy,  # type: ignore[arg-type]
             resume=config.resume,
             use_stac=config.use_stac,
+            s1_s3_every_calendar_day=not config.s1_s3_on_s2_days_only,
         )
 
         ok = fail = 0

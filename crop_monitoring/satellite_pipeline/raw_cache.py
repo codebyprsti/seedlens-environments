@@ -114,3 +114,37 @@ def indices_row_exists(
         },
     ).fetchone()
     return row is not None
+
+
+def raw_exists_for_s1s3_bulk(
+    db: Session,
+    *,
+    location_id: str,
+    file_name: str,
+    season_id: Optional[str],
+    start_date: str,
+) -> bool:
+    """True if bulk Statistical S1+S3 raw payloads exist for this field/season."""
+    row = db.execute(
+        text("""
+            SELECT COUNT(DISTINCT satellite) AS n
+            FROM operations.satellite_raw_observation
+            WHERE location_id = :loc
+              AND file_name = :fn
+              AND season_id IS NOT DISTINCT FROM :sid
+              AND satellite IN ('S1', 'S3')
+              AND source IN ('copernicus_s1_statistical_v2', 'copernicus_s3_statistical_v2')
+              AND raw_response IS NOT NULL
+              AND (
+                raw_response::text LIKE '%' || :start || '%'
+                OR metadata::text LIKE '%' || :start || '%'
+              )
+        """),
+        {
+            "loc": location_id,
+            "fn": file_name,
+            "sid": season_id,
+            "start": start_date[:10],
+        },
+    ).fetchone()
+    return row is not None and int(row[0]) >= 2

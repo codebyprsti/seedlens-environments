@@ -4,8 +4,12 @@ Requires Python 3.10+
 Enhanced with advanced analytics features
 """
 import json
+import logging
+import time
 from tools import LLMTool, DatabaseTool
 from utils import Utils
+
+logger = logging.getLogger(__name__)
 
 
 class ConversationalAgent:
@@ -33,6 +37,7 @@ class ConversationalAgent:
         self.current_table_context: dict[str, any] | None = None
         self.few_shot_prompt = few_shot_prompt or ""
         self.rules = rules or ""
+        self.rolling_window = 10  # Only send last N messages to LLM (avoid token explosion)
         
     def set_table_context(self, schema: str, table: str) -> dict[str, any]:
         """
@@ -45,7 +50,18 @@ class ConversationalAgent:
         Returns:
             Dict with table structure information
         """
+        logger.info(f"Setting table context: schema={schema}, table={table}")
         table_structure = self.db_tool.get_table_structure(schema, table)
+        
+        # Log table structure info
+        if table_structure and "columns" in table_structure:
+            columns = [col.get("column_name", "") for col in table_structure["columns"]]
+            logger.info(f"Table {schema}.{table} has {len(columns)} columns: {', '.join(columns[:10])}{'...' if len(columns) > 10 else ''}")
+        else:
+            logger.warning(f"Table structure not found or empty for {schema}.{table}")
+            if "error" in table_structure:
+                logger.error(f"Error fetching table structure: {table_structure['error']}")
+        
         self.current_table_context = {
             "schema": schema,
             "table": table,
@@ -79,6 +95,8 @@ class ConversationalAgent:
         
         # Step 2: Execute SQL on database
         schema = self.current_table_context.get("schema") if self.current_table_context else None
+        table = self.current_table_context.get("table") if self.current_table_context else None
+        logger.debug("Executing SQL for %s.%s", schema, table)
         execution_result = self._execute_sql(generated_sql, schema)
         
         if not execution_result["success"]:
@@ -120,11 +138,17 @@ class ConversationalAgent:
         }
         
         # Add to conversation history
-        self.conversation_history.append({
+        history_entry = {
             "query": user_query,
             "sql": response["sql"],
-            "row_count": response["row_count"]
-        })
+            "row_count": response["row_count"],
+            "timestamp": time.time()
+        }
+        self.conversation_history.append(history_entry)
+        
+        # Keep only last N entries (rolling window)
+        if len(self.conversation_history) > self.rolling_window * 2:
+            self.conversation_history = self.conversation_history[-self.rolling_window * 2:]
         
         return response
     
@@ -143,6 +167,8 @@ class ConversationalAgent:
         schema = self.current_table_context["schema"]
         table = self.current_table_context["table"]
         
+        logger.info("SQL generation: schema=%s, table=%s, query='%s'", schema, table, user_query[:100])
+        
         # Create prompt for LLM
         prompt = self._create_sql_generation_prompt(
             user_query, 
@@ -151,8 +177,12 @@ class ConversationalAgent:
             table_info
         )
         
-        # Call LLM
-        result = self.llm_tool.generate_sql(prompt, self.conversation_history)
+        # Call LLM with rolling memory (last N messages only)
+        history_for_llm = self.conversation_history[-self.rolling_window:] if self.conversation_history else []
+        result = self.llm_tool.generate_sql(prompt, history_for_llm)
+        
+        if result.get("success") and result.get("sql"):
+            logger.info("Generated SQL for %s.%s: %s", schema, table, result["sql"][:200])
         
         return result
     
@@ -181,9 +211,23 @@ class ConversationalAgent:
         Returns:
             Dict with execution result of fixed SQL
         """
-        table_info = self.current_table_context["structure"]
-        schema = self.current_table_context["schema"]
-        table = self.current_table_context["table"]
+        table_info = self.current_table_context.get("structure", {})
+        schema = self.current_table_context.get("schema", "")
+        table = self.current_table_context.get("table", "")
+        
+        # Extract available columns for better error context
+        available_columns = []
+        if table_info and "columns" in table_info:
+            available_columns = [col.get("column_name", "") for col in table_info["columns"]]
+        
+        # Check if error is about missing column
+        column_error_match = None
+        import re
+        if "does not exist" in error.lower() and "column" in error.lower():
+            # Try to extract column name from error
+            match = re.search(r'column\s+"?(\w+)"?\s+does not exist', error, re.IGNORECASE)
+            if match:
+                column_error_match = match.group(1)
         
         # Create prompt for SQL fix
         fix_prompt = f"""The following SQL query failed with an error. Please fix it.
@@ -199,15 +243,33 @@ Error:
 Table: {schema}.{table}
 Table Structure:
 {json.dumps(table_info, indent=2)}
-
-Please provide a corrected SQL query that will work."""
+"""
+        
+        if available_columns:
+            fix_prompt += f"\nCRITICAL: Available columns in this table: {', '.join(available_columns)}"
+            fix_prompt += f"\nONLY use columns from this list. Do not use columns that are not listed."
+        
+        if column_error_match:
+            fix_prompt += f"\n\nERROR DETECTED: Column '{column_error_match}' does not exist in this table."
+            if available_columns:
+                # Suggest similar columns
+                similar = [c for c in available_columns if column_error_match.lower() in c.lower() or c.lower() in column_error_match.lower()]
+                if similar:
+                    fix_prompt += f"\nSimilar columns that exist: {', '.join(similar)}"
+                else:
+                    fix_prompt += f"\nPlease remove '{column_error_match}' from the query or use an alternative column."
+        
+        fix_prompt += "\n\nPlease provide a corrected SQL query that uses ONLY columns from the table structure above."
         
         fix_result = self.llm_tool.generate_sql(fix_prompt, [])
         
         if not fix_result["success"]:
+            error_msg = f"Failed to fix SQL. Original error: {error}"
+            if column_error_match and available_columns:
+                error_msg += f"\nColumn '{column_error_match}' does not exist. Available columns: {', '.join(available_columns)}"
             return {
                 "success": False,
-                "error": f"Failed to fix SQL. Original error: {error}"
+                "error": error_msg
             }
         
         # Try executing the fixed SQL
@@ -239,6 +301,11 @@ Please provide a corrected SQL query that will work."""
         Returns:
             Formatted prompt string
         """
+        # Extract available columns from table structure
+        available_columns = []
+        if table_info and "columns" in table_info:
+            available_columns = [col.get("column_name", "") for col in table_info["columns"]]
+        
         # Build comprehensive prompt with few-shot examples and rules
         prompt_parts = []
         
@@ -247,9 +314,20 @@ Please provide a corrected SQL query that will work."""
         prompt_parts.append(f"Table: {schema}.{table}")
         prompt_parts.append(f"\nTable Structure:\n{json.dumps(table_info, indent=2)}")
         
-        # Add few-shot examples if available
+        # CRITICAL: Add column validation guardrail
+        if available_columns:
+            columns_list = ", ".join(available_columns)
+            prompt_parts.append(f"""
+CRITICAL COLUMN VALIDATION:
+- ONLY use columns that exist in the table structure above
+- Available columns: {columns_list}
+- DO NOT use columns that are not listed above (e.g., 'state', 'variety', 'productivity' unless they appear in the table structure)
+- If a column doesn't exist, omit it from the query or use an alternative column that exists
+""")
+        
+        # Add few-shot examples if available (but warn about column validation)
         if self.few_shot_prompt:
-            prompt_parts.append(f"\n{self.few_shot_prompt}")
+            prompt_parts.append(f"\nFew-shot Examples (NOTE: Verify all columns exist in table structure above):\n{self.few_shot_prompt}")
         
         # Add rules if available
         if self.rules:
@@ -260,13 +338,15 @@ Please provide a corrected SQL query that will work."""
 Requirements:
 1. Generate a valid PostgreSQL query
 2. Use the fully qualified table name: {schema}.{table}
-3. Return ONLY the SQL query, no explanations unless asked
-4. Ensure the query is safe and read-only (SELECT statements only)
-5. Consider adding LIMIT clause if not specified to avoid large result sets
-6. Use gross_amount unless specified otherwise
-7. If there is month, include only month name as month
-8. Order results based on the date, if there is date included
-9. Return only the last query that is relevant to the prompt""")
+3. ONLY use columns that exist in the table structure provided above
+4. Return ONLY the SQL query, no explanations unless asked
+5. Ensure the query is safe and read-only (SELECT statements only)
+6. Consider adding LIMIT clause if not specified to avoid large result sets
+7. Use gross_amount unless specified otherwise
+8. If there is month, include only month name as month
+9. Order results based on the date, if there is date included
+10. Return only the last query that is relevant to the prompt
+11. If a requested column doesn't exist, omit it or use the closest matching column from the table structure""")
 
         # Add user question
         prompt_parts.append(f"\nUser Question: {user_query}")

@@ -1,0 +1,3 @@
+Dropped columns (if existed): crop_indices_id (all sentinel tables), valid_pixel_fraction (S2)
+Added: satellite_source, cloud_coverage, orbit_direction, processing_level
+Unique index: (location_id, season_id, acquisition_date, satellite_source)

@@ -1,0 +1,5 @@
+# Satellite harvest deployment — install via main requirements.txt
+-r requirements.txt
+
+# Lab CLI has no extra deps beyond requirements.txt.
+# Minimum: python 3.10+, psycopg2-binary, sentinelhub, sqlalchemy, pandas, openpyxl, shapely, python-dotenv

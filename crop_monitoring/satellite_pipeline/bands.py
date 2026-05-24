@@ -45,5 +45,8 @@ MANIFESTS = {
 
 
 def band_column_name(band_id: str) -> str:
-    """Map B02 → b02, B8A → b8a for DB columns."""
-    return band_id.lower().replace("b8a", "b8a")
+    """Map B02 → blue, B8A → narrow_nir (operations.crop_indices names)."""
+    from crop_monitoring.satellite_pipeline.crop_indices_columns import S2_BAND_TO_CROP
+
+    key = band_id.lower().replace("b8a", "b8a")
+    return S2_BAND_TO_CROP.get(key, key)

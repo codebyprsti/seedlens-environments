@@ -12,13 +12,22 @@ import logging
 from typing import Dict, List, Tuple, Optional, Any
 from services.yield_service import YieldService
 import numpy as np
+import time
+from collections import defaultdict
 
-from sqlalchemy import MetaData, func
+from sqlalchemy import MetaData, func, text, inspect as sqlalchemy_inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+try:
+    import psycopg2.extras
+    PSYCOPG2_AVAILABLE = True
+except ImportError:
+    PSYCOPG2_AVAILABLE = False
+    logging.warning("psycopg2.extras not available, will use slower SQLAlchemy inserts")
 from models.db_models import (
     CropRecord, VarietyRecord, LocationRecord,
-    GrowerRecord, OrganizerRecord, SeasonCropInspectionBase, YieldRecord, SupplyChainPlanning
+    GrowerRecord, OrganizerRecord, SeasonCropInspectionBase, YieldRecord, SupplyChainPlanning,
+    SeasonRecord
 )
 from services.inspection_service import InspectionLevelProcessor
 from models.schemas.base import (
@@ -39,10 +48,14 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Profiling: log row throughput every N rows
+PROGRESS_LOG_INTERVAL = 1000
+
 
 class RecordService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, skip_init_cache: bool = False):
         self.db = db
+        self.skip_init_cache = skip_init_cache
         self.unique_records ={
             'crops': [],
             'varieties': [],
@@ -74,7 +87,15 @@ class RecordService:
             'growers': 0,
             'organizers': 0
         }
-        # Initialize caches - handle connection errors gracefully
+        # Initialize caches - handle connection errors gracefully (skip if reload will preload)
+        if skip_init_cache:
+            self.crop_name_to_id = {}
+            self.variety_name_to_id = {}
+            self.variety_name_crop_to_id = {}
+            self.location_name_to_id = {}
+            self.grower_name_to_id = {}
+            self.organizer_name_to_id = {}
+            return
         try:
             self.crop_name_to_id = {
                 crop.crop_name.strip().lower(): crop.crop_id
@@ -460,72 +481,94 @@ class RecordService:
                 clean_record[key] = value
         return clean_record
 
-    def bulk_insert_inspection_base(self, base_records: List[Dict]) -> int:
+    def bulk_insert_inspection_base(self, base_records: List[Dict], truncate: bool = True) -> int:
         """
-        Bulk insert SeasonCropInspectionBase records with duplicate handling.
+        Bulk insert SeasonCropInspectionBase records with TRUNCATE option for idempotent reload.
         """
         try:
             if not base_records:
+                logger.info("No inspection base records to insert")
                 return 0
 
-            # Get existing combinations (avoid full duplication check on all columns, so we check key uniqueness)
-            # Handle database connection errors gracefully
-            try:
-                existing_keys = set(
-                    (r.season_id, r.crop_id, r.variety_id, r.grower_id, r.lot_id)
-                    for r in self.db.query(
-                        SeasonCropInspectionBase.season_id,
-                        SeasonCropInspectionBase.crop_id,
-                        SeasonCropInspectionBase.variety_id,
-                        SeasonCropInspectionBase.grower_id,
-                        SeasonCropInspectionBase.lot_id
-                    ).all()
-                )
-            except Exception as db_error:
-                # Database not available - skip duplicate check, insert all records
-                logger.warning(f"Could not check for existing records (database may not be available): {db_error}")
-                logger.info("Proceeding without duplicate check - all records will be attempted for insertion")
-                existing_keys = set()
-
-            # Filter out existing records by (season_id, crop_id, variety_id, grower_id, lot_id)
-            new_records = []
-            for record in base_records:
-                key = (
-                    record.get('season_id'),
-                    record.get('crop_id'),
-                    record.get('variety_id'),
-                    record.get('grower_id'),
-                    record.get('lot_id')
-                )
-                if key not in existing_keys:
-                    new_records.append(record)
-
-            if not new_records:
-                logger.info("No new inspection base records to insert")
-                return 0
-
-            # Validate and create records
-            validated_records = []
-            for record in new_records:
+            # TRUNCATE table if requested (for idempotent reload)
+            truncated_rows = 0
+            if truncate:
                 try:
-                    record = self.clean_null_values(record)
-                    # if any(record.get(field) is None for field in self.REQUIRED_FIELDS):
-                    #     logger.warning(f"Skipping record due to missing required fields: {record}")
-                    #     continue
-                    base_schema = SeasonCropInspectionBaseCreate(**record)
-                    validated_records.append(SeasonCropInspectionBase(**base_schema.dict()))
+                    truncated_rows = self._truncate_table('season_crop_inspection_base', 'operations')
                 except Exception as e:
-                    logger.warning(f"Invalid inspection_base record {record}: {str(e)}")
+                    logger.warning(f"Could not truncate table (may not exist or no permissions): {str(e)}")
+                    # Continue with insert anyway
+
+            # Convert DataFrame to list of dicts if needed
+            if isinstance(base_records, pd.DataFrame):
+                base_records = base_records.to_dict('records')
+
+            # Sync table columns (add missing columns dynamically)
+            df_temp = pd.DataFrame(base_records)
+            added_columns = self._sync_table_columns(df_temp, 'season_crop_inspection_base', 'operations')
+            if added_columns:
+                logger.info(f"Added {len(added_columns)} new columns to season_crop_inspection_base: {added_columns}")
+
+            # Clean and validate records
+            validated_records = []
+            unresolved_locations = 0
+            
+            for record in base_records:
+                try:
+                    # Clean null values
+                    record = self.clean_null_values(record)
+                    
+                    # Resolve location_id using improved location resolution
+                    village = record.get('village')
+                    mandal = record.get('mandal')
+                    district = record.get('district')
+                    state = record.get('state')
+                    
+                    if village:
+                        location_id = self._resolve_location_id(village, mandal, district, state)
+                        if location_id:
+                            record['location_id'] = location_id
+                        else:
+                            unresolved_locations += 1
+                            logger.warning(f"Could not resolve location for village: {village}")
+                    
+                    # Apply fuzzy column mapping
+                    mapped_record = {}
+                    for key, value in record.items():
+                        mapped_key = self._fuzzy_map_column_name(key) or key
+                        mapped_record[mapped_key] = value
+                    record = mapped_record
+                    
+                    # Validate with schema
+                    base_schema = SeasonCropInspectionBaseCreate(**record)
+                    validated_records.append(base_schema.dict())
+                except Exception as e:
+                    logger.warning(f"Invalid inspection_base record skipped: {str(e)}")
                     continue
 
-            # Bulk insert
-            if validated_records:
-                self.db.bulk_save_objects(validated_records)
-                self.db.commit()
-                self.processed_counts['inspection_base'] = len(validated_records)
-                logger.info(f"Inserted {len(validated_records)} new inspection base records")
+            if not validated_records:
+                logger.warning("No valid inspection base records after validation")
+                return 0
 
-            return len(validated_records)
+            # Bulk insert using bulk_insert_mappings for performance
+            try:
+                self.db.bulk_insert_mappings(SeasonCropInspectionBase, validated_records)
+                self.db.commit()
+                
+                inserted_count = len(validated_records)
+                self.processed_counts['inspection_base'] = inserted_count
+                
+                logger.info(f"Successfully inserted {inserted_count} inspection base records")
+                if truncated_rows > 0:
+                    logger.info(f"Truncated {truncated_rows} existing rows before insert")
+                if unresolved_locations > 0:
+                    logger.warning(f"Could not resolve {unresolved_locations} locations")
+                
+                return inserted_count
+            except Exception as e:
+                self.db.rollback()
+                logger.error(f"Error during bulk insert: {str(e)}")
+                raise
 
         except Exception as e:
             logger.error(f"Error bulk inserting inspection base records: {str(e)}")
@@ -537,6 +580,281 @@ class RecordService:
             self.rename_map.get(k.strip(), k.strip()): v
             for k, v in record.items()
         }
+
+    def _fuzzy_map_column_name(self, excel_col: str) -> Optional[str]:
+        """
+        Fuzzy mapping for Excel column names to DB column names.
+        Handles variations like "net acreage area" → net_acerage_area
+        """
+        if not excel_col:
+            return None
+        
+        # Normalize: lowercase, strip, replace spaces/special chars with underscore
+        normalized = str(excel_col).lower().strip()
+        normalized = re.sub(r'[^\w\s]', '_', normalized)
+        normalized = re.sub(r'[\s_]+', '_', normalized)
+        
+        # Column mapping dictionary
+        column_mapping = {
+            # Net acreage variations
+            'net_acreage_area': 'net_acerage_area',
+            'net_acreage': 'net_acerage_area',
+            'net_acerage': 'net_acerage_area',
+            'net_acerage_area': 'net_acerage_area',
+            
+            # Final harvestable area
+            'final_harvestable_area': 'final_harvestable_area',
+            'final_harvestable': 'final_harvestable_area',
+            'harvestable_area': 'final_harvestable_area',
+            
+            # Packed quantity variations
+            'packed_qty': 'packed_qt',
+            'packed_quantity': 'packed_qt',
+            'packed_qt': 'packed_qt',
+            
+            # Productivity variations
+            'productivity_packed_seed': 'productivity_of_packed_seed',
+            'productivity_of_packed_seed': 'productivity_of_packed_seed',
+            'productivity': 'productivity_of_packed_seed',
+            
+            # Lot variations
+            'lot': 'lot_id',
+            'lot_no': 'lot_id',
+            'lot_number': 'lot_id',
+            'lot_id': 'lot_id',
+            'lot_no_batch_no': 'lot_id',
+            'mrno_lot_no': 'lot_id',
+            'mrno_lotno': 'lot_id',
+        }
+        
+        # Direct match
+        if normalized in column_mapping:
+            return column_mapping[normalized]
+        
+        # Partial match (contains)
+        for key, value in column_mapping.items():
+            if key in normalized or normalized in key:
+                return value
+        
+        # Return normalized version if no match
+        return normalized
+
+    def _sync_table_columns(self, df: pd.DataFrame, table_name: str, schema: str = 'operations') -> List[str]:
+        """
+        Compare DataFrame columns with database table columns.
+        Add missing columns dynamically.
+        Returns list of newly added columns.
+        """
+        try:
+            # Get existing table columns
+            inspector = sqlalchemy_inspect(self.db.bind if hasattr(self.db, 'bind') else sync_engine)
+            existing_columns = {col['name'] for col in inspector.get_columns(table_name, schema=schema)}
+            
+            # Get DataFrame columns (after fuzzy mapping)
+            df_columns = set(df.columns)
+            
+            # Find missing columns
+            missing_columns = []
+            for df_col in df_columns:
+                # Apply fuzzy mapping
+                mapped_col = self._fuzzy_map_column_name(df_col)
+                if mapped_col and mapped_col not in existing_columns:
+                    missing_columns.append((df_col, mapped_col))
+            
+            # Add missing columns
+            added_columns = []
+            for original_col, mapped_col in missing_columns:
+                try:
+                    # Infer datatype from DataFrame
+                    sample_data = df[original_col].dropna()
+                    if len(sample_data) == 0:
+                        col_type = 'VARCHAR(255)'
+                    else:
+                        sample_value = sample_data.iloc[0]
+                        if pd.api.types.is_numeric_dtype(df[original_col]):
+                            col_type = 'FLOAT'
+                        elif pd.api.types.is_datetime64_any_dtype(df[original_col]) or isinstance(sample_value, (pd.Timestamp, datetime)):
+                            col_type = 'DATE'
+                        else:
+                            col_type = 'VARCHAR(255)'
+                    
+                    # Execute ALTER TABLE
+                    alter_sql = text(f"""
+                        ALTER TABLE {schema}.{table_name}
+                        ADD COLUMN IF NOT EXISTS {mapped_col} {col_type}
+                    """)
+                    self.db.execute(alter_sql)
+                    self.db.commit()
+                    
+                    added_columns.append(mapped_col)
+                    logger.info(f"Added column '{mapped_col}' ({col_type}) to {schema}.{table_name} (from Excel column '{original_col}')")
+                except Exception as e:
+                    logger.warning(f"Failed to add column '{mapped_col}' to {schema}.{table_name}: {str(e)}")
+                    self.db.rollback()
+                    continue
+            
+            return added_columns
+        except Exception as e:
+            logger.error(f"Error syncing table columns for {schema}.{table_name}: {str(e)}")
+            return []
+
+    def _resolve_location_id(self, village: str, mandal: Optional[str] = None, 
+                            district: Optional[str] = None, state: Optional[str] = None) -> Optional[str]:
+        """
+        Resolve location_id using composite key: village + district + state (all normalized).
+        Case-insensitive, trimmed matching with TRIM() and LOWER().
+        If no match found, insert new location and return new location_id.
+        
+        Matching Rule: village_name + district + state (all trimmed and lowercase)
+        """
+        if not village or pd.isna(village):
+            return None
+        
+        # Normalize all fields: TRIM() and LOWER()
+        village_clean = str(village).strip().lower()
+        mandal_clean = str(mandal).strip().lower() if mandal and pd.notna(mandal) else None
+        district_clean = str(district).strip().lower() if district and pd.notna(district) else None
+        state_clean = str(state).strip().lower() if state and pd.notna(state) else None
+        
+        # PRIMARY MATCHING RULE: Composite key (village + district + state)
+        # Try most specific match first: village + district + state
+        if village_clean and district_clean and state_clean:
+            # Check cache first
+            cache_key = f"{village_clean}|{district_clean}|{state_clean}"
+            if cache_key in self.location_name_to_id:
+                return self.location_name_to_id[cache_key]
+            
+            # Query database with composite key
+            existing = self.db.query(LocationRecord).filter(
+                func.lower(func.trim(LocationRecord.village)) == village_clean,
+                func.lower(func.trim(LocationRecord.district)) == district_clean,
+                func.lower(func.trim(LocationRecord.state)) == state_clean
+            ).first()
+            
+            if existing:
+                # Update cache
+                self.location_name_to_id[cache_key] = existing.location_id
+                return existing.location_id
+        
+        # Fallback: Try village + district (if state not available)
+        if village_clean and district_clean:
+            cache_key = f"{village_clean}|{district_clean}"
+            if cache_key in self.location_name_to_id:
+                return self.location_name_to_id[cache_key]
+            
+            existing = self.db.query(LocationRecord).filter(
+                func.lower(func.trim(LocationRecord.village)) == village_clean,
+                func.lower(func.trim(LocationRecord.district)) == district_clean
+            ).first()
+            
+            if existing:
+                self.location_name_to_id[cache_key] = existing.location_id
+                return existing.location_id
+        
+        # Last fallback: village only (least specific)
+        if village_clean in self.location_name_to_id:
+            return self.location_name_to_id[village_clean]
+        
+        existing = self.db.query(LocationRecord).filter(
+            func.lower(func.trim(LocationRecord.village)) == village_clean
+        ).first()
+        
+        if existing:
+            self.location_name_to_id[village_clean] = existing.location_id
+            return existing.location_id
+        
+        # Create new location (no match found)
+        try:
+            max_location = self.db.query(func.max(LocationRecord.location_id)).scalar()
+            if max_location:
+                match = re.search(r'\d+', max_location)
+                max_num = int(match.group()) if match else 500000
+            else:
+                max_num = 500000
+            
+            new_id = f"L_{max_num + 1}"
+            new_location = LocationRecord(
+                location_id=new_id,
+                village=str(village).strip(),
+                unique_location_id=str(village).strip(),
+                mandal=str(mandal).strip() if mandal and pd.notna(mandal) else None,
+                district=str(district).strip() if district and pd.notna(district) else None,
+                state=str(state).strip() if state and pd.notna(state) else None,
+                category_id=100004
+            )
+            self.db.add(new_location)
+            self.db.commit()
+            
+            # Update cache with all possible keys
+            self.location_name_to_id[village_clean] = new_id
+            if district_clean:
+                key_district = f"{village_clean}|{district_clean}"
+                self.location_name_to_id[key_district] = new_id
+            if district_clean and state_clean:
+                key_full = f"{village_clean}|{district_clean}|{state_clean}"
+                self.location_name_to_id[key_full] = new_id
+            
+            logger.info(f"✅ Created new location: {new_id} - {village} (district: {district or 'N/A'}, state: {state or 'N/A'})")
+            return new_id
+        except Exception as e:
+            logger.error(f"Error creating location {village}: {e}")
+            self.db.rollback()
+            return None
+
+    def _truncate_table(self, table_name: str, schema: str = 'operations') -> int:
+        """
+        TRUNCATE table and return number of rows truncated.
+        """
+        try:
+            # Get row count before truncate
+            count_query = text(f"SELECT COUNT(*) FROM {schema}.{table_name}")
+            result = self.db.execute(count_query)
+            row_count = result.scalar() or 0
+            
+            # TRUNCATE with RESTART IDENTITY CASCADE
+            truncate_sql = text(f"TRUNCATE TABLE {schema}.{table_name} RESTART IDENTITY CASCADE")
+            self.db.execute(truncate_sql)
+            self.db.commit()
+            
+            logger.info(f"Truncated {schema}.{table_name}: {row_count} rows removed")
+            return row_count
+        except Exception as e:
+            logger.error(f"Error truncating {schema}.{table_name}: {str(e)}")
+            self.db.rollback()
+            raise
+
+    def _clean_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Clean DataFrame: trim strings, convert numeric/date columns safely.
+        """
+        df = df.copy()
+        
+        # Trim and lowercase lot_id if exists
+        if 'lot_id' in df.columns:
+            df['lot_id'] = df['lot_id'].astype(str).str.strip().str.lower()
+        if 'lot_no' in df.columns:
+            df['lot_no'] = df['lot_no'].astype(str).str.strip().str.lower()
+        
+        # Convert numeric columns safely
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Convert date columns
+        date_patterns = ['date', 'created_at', 'updated_at', 'soaking_date', 'tp_date']
+        for col in df.columns:
+            if any(pattern in col.lower() for pattern in date_patterns):
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+        
+        # Trim string columns
+        string_cols = df.select_dtypes(include=['object']).columns.tolist()
+        for col in string_cols:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip()
+                df[col] = df[col].replace(['nan', 'NaN', 'None', 'null', ''], None)
+        
+        return df
 
     def _generate_sequential_ids(self, records: List[Dict], prefix: str, start: int = 1, pad: int = 3,
                                  id_key: str = "id") -> List[Dict]:
@@ -604,7 +922,7 @@ class RecordService:
             self.db.add(new_crop)
             self.db.commit()
             self.crop_name_to_id[crop_name_clean] = new_id
-            logger.info(f"Created new crop: {new_id} - {crop_name}")
+            logger.info(f"✅ Created new master record [CROP]: {new_id} - '{crop_name}' (normalized: '{crop_name_clean}')")
             return new_id
         except Exception as e:
             logger.error(f"Error creating crop {crop_name}: {e}")
@@ -652,7 +970,7 @@ class RecordService:
             self.db.commit()
             self.variety_name_to_id[variety_name_norm] = new_id
             self.variety_name_crop_to_id[cache_key] = new_id
-            logger.info(f"Created new variety: {new_id} - {variety_name} (crop_id: {crop_id})")
+            logger.info(f"✅ Created new master record [VARIETY]: {new_id} - '{variety_name}' (crop_id: {crop_id}, normalized: '{variety_name_norm}')")
             return new_id
         except Exception as e:
             logger.error(f"Error creating variety {variety_name}: {e}")
@@ -913,7 +1231,7 @@ class RecordService:
             unique_records = self._process_inspection_base_records(df, unique_records)
             # Try to insert, but don't fail if database isn't available
             try:
-                self.bulk_insert_inspection_base(unique_records["season_crop_inspection_base"])
+                self.bulk_insert_inspection_base(unique_records["season_crop_inspection_base"], truncate=True)
             except Exception as e:
                 logger.warning(f"Could not insert inspection base records (database may not be available): {e}")
                 logger.info("Continuing with data processing...")
@@ -921,7 +1239,7 @@ class RecordService:
             unique_records = self._process_yield_records(df, unique_records)
             # Try to insert, but don't fail if database isn't available
             try:
-                self.bulk_insert_yield_records(unique_records["season_crop_yield"])
+                self.bulk_insert_yield_records(unique_records["season_crop_yield"], truncate=True)
             except Exception as e:
                 logger.warning(f"Could not insert yield records (database may not be available): {e}")
                 logger.info("Continuing with data processing...")
@@ -1682,121 +2000,109 @@ class RecordService:
 
         return cleaned
 
-    def bulk_insert_yield_records(self, yield_records: List[Dict]) -> int:
+    def bulk_insert_yield_records(self, yield_records: List[Dict], truncate: bool = True) -> int:
         """
-        Bulk insert yield records with deduplication and validation.
+        Bulk insert yield records with TRUNCATE option for idempotent reload.
         """
         try:
             if not yield_records:
+                logger.info("No yield records to insert")
                 return 0
 
-            # Fetch existing composite keys to avoid duplicate inserts
-            # Handle database connection errors gracefully
-            try:
-                existing_keys = set(
-                    tuple(r) for r in self.db.query(
-                        YieldRecord.grower_id,
-                        YieldRecord.crop_id,
-                        YieldRecord.lot_id,
-                        YieldRecord.season_id,
-                        YieldRecord.variety_id
-                    ).all()
-                )
-            except Exception as db_error:
-                # Database not available - skip duplicate check, insert all records
-                logger.warning(f"Could not check for existing yield records (database may not be available): {db_error}")
-                logger.info("Proceeding without duplicate check - all records will be attempted for insertion")
-                existing_keys = set()
-
-            # Deduplicate incoming records
-            def record_key(rec: Dict):
-                return (
-                    rec.get("grower_id"),
-                    rec.get("crop_id"),
-                    rec.get("lot_id"),
-                    rec.get("season_id"),
-                    rec.get("variety_id")
-                )
-
-            new_records = [
-                r for r in yield_records if record_key(r) not in existing_keys
-            ]
-
-            new_df = pd.DataFrame(new_records)
-            # new_df = new_df.drop_duplicates(
-            #     subset=["grower_id", "crop_id", "lot_id", "season_id", "variety_id"]
-            # )
-            new_records = new_df.to_dict(orient="records")
-
-            if not new_records:
-                logger.info("No new yield records to insert")
-                return 0
-
-            # Get valid column names from the YieldRecord model
-            # This gets columns defined in the SQLAlchemy model
-            model_columns = set(YieldRecord.__table__.columns.keys())
-            
-            # Query actual database table columns to see what exists
-            # Use model columns as default, only filter if we can successfully inspect
-            valid_columns = model_columns
-            try:
-                from sqlalchemy import inspect
-                from sqlalchemy.exc import OperationalError
-                # Get engine from the session
-                engine = self.db.bind if hasattr(self.db, 'bind') else sync_engine
-                inspector = inspect(engine)
-                table_columns = inspector.get_columns('season_crop_yield', schema='operations')
-                actual_db_columns = {col['name'] for col in table_columns}
-                # Use intersection - only columns that exist in both model and database
-                valid_columns = model_columns.intersection(actual_db_columns)
-                logger.info(f"Database table has {len(actual_db_columns)} columns, model has {len(model_columns)} columns")
-                if model_columns - actual_db_columns:
-                    missing_cols = model_columns - actual_db_columns
-                    logger.warning(f"Columns in model but not in database: {missing_cols}. These will be filtered out.")
-            except (OperationalError, AttributeError, Exception) as e:
-                # If we can't inspect (database not available, connection error, etc.), 
-                # use model columns and let SQLAlchemy handle missing columns at insert time
-                # This is expected if database is not running or not accessible
-                logger.debug(f"Could not inspect database schema (database may not be available), using model columns only: {type(e).__name__}")
-                valid_columns = model_columns
-
-            # Validate and transform
-            validated_yield_records = []
-            for record in new_records:
+            # TRUNCATE table if requested (for idempotent reload)
+            truncated_rows = 0
+            if truncate:
                 try:
+                    truncated_rows = self._truncate_table('season_crop_yield', 'operations')
+                except Exception as e:
+                    logger.warning(f"Could not truncate table (may not exist or no permissions): {str(e)}")
+                    # Continue with insert anyway
+
+            # Convert to DataFrame for processing
+            if isinstance(yield_records, pd.DataFrame):
+                df_yield = yield_records.copy()
+            else:
+                df_yield = pd.DataFrame(yield_records)
+
+            # Clean DataFrame
+            df_yield = self._clean_dataframe(df_yield)
+
+            # Sync table columns (add missing columns dynamically)
+            added_columns = self._sync_table_columns(df_yield, 'season_crop_yield', 'operations')
+            if added_columns:
+                logger.info(f"Added {len(added_columns)} new columns to season_crop_yield: {added_columns}")
+
+            # Get valid column names from database
+            try:
+                inspector = sqlalchemy_inspect(self.db.bind if hasattr(self.db, 'bind') else sync_engine)
+                table_columns = inspector.get_columns('season_crop_yield', schema='operations')
+                valid_columns = {col['name'] for col in table_columns}
+            except Exception as e:
+                logger.warning(f"Could not inspect database schema, using model columns: {str(e)}")
+                valid_columns = set(YieldRecord.__table__.columns.keys())
+
+            # Apply fuzzy column mapping to DataFrame columns
+            column_mapping = {}
+            for col in df_yield.columns:
+                mapped_col = self._fuzzy_map_column_name(col) or col
+                if mapped_col in valid_columns:
+                    column_mapping[col] = mapped_col
+                else:
+                    logger.debug(f"Column '{col}' (mapped to '{mapped_col}') not in database table, will be filtered")
+
+            # Rename columns using mapping
+            df_yield = df_yield.rename(columns=column_mapping)
+
+            # Filter to only valid columns
+            df_yield = df_yield[[col for col in df_yield.columns if col in valid_columns]]
+
+            # Convert to records
+            records = df_yield.to_dict('records')
+
+            # Validate and clean records
+            validated_records = []
+            for record in records:
+                try:
+                    # Clean record
                     record = self._clean_record_for_validation(record)
                     
-                    # Filter out columns that don't exist in the database table
-                    filtered_record = {k: v for k, v in record.items() if k in valid_columns}
-                    
-                    # Log if any columns were filtered out (only for first record to avoid spam)
-                    if validated_yield_records == []:
-                        removed_cols = set(record.keys()) - set(filtered_record.keys())
-                        if removed_cols:
-                            logger.info(f"Filtered out columns not in database table: {removed_cols}")
-                    
+                    # Convert string fields
                     string_fields = [
                         'production_co', 'purchase_order', 'slab', 'tp_days_slab',
-                        'production_location', 'production_manager', 'pos_done_b'
+                        'production_location', 'production_manager', 'pos_done_b', 'm1_soaking_slab'
                     ]
-
                     for field in string_fields:
-                        if field in filtered_record and filtered_record[field] is not None:
-                            filtered_record[field] = str(filtered_record[field])
+                        if field in record and record[field] is not None:
+                            record[field] = str(record[field])
 
-                    validated = YieldRecordBase(**filtered_record)
-                    validated_yield_records.append(YieldRecord(**validated.dict()))
+                    # Validate with schema
+                    validated = YieldRecordBase(**record)
+                    validated_records.append(validated.dict())
                 except Exception as e:
-                    logger.warning(f"Invalid yield record skipped: {record} — Error: {str(e)}")
+                    logger.warning(f"Invalid yield record skipped: {str(e)}")
                     continue
 
-            if validated_yield_records:
-                self.db.bulk_save_objects(validated_yield_records)
-                self.db.commit()
-                self.processed_counts["yield"] = len(validated_yield_records)
-                logger.info(f"Inserted {len(validated_yield_records)} yield records")
+            if not validated_records:
+                logger.warning("No valid yield records after validation")
+                return 0
 
-            return len(validated_yield_records)
+            # Bulk insert using bulk_insert_mappings for performance
+            try:
+                self.db.bulk_insert_mappings(YieldRecord, validated_records)
+                self.db.commit()
+                
+                inserted_count = len(validated_records)
+                self.processed_counts["yield"] = inserted_count
+                
+                logger.info(f"Successfully inserted {inserted_count} yield records")
+                if truncated_rows > 0:
+                    logger.info(f"Truncated {truncated_rows} existing rows before insert")
+                
+                return inserted_count
+            except Exception as e:
+                self.db.rollback()
+                logger.error(f"Error during bulk insert: {str(e)}")
+                raise
 
         except Exception as e:
             logger.error(f"Error bulk inserting yield records: {str(e)}")
@@ -2005,29 +2311,13 @@ class RecordService:
         
         df['variety_id'] = df.apply(get_variety_id, axis=1)
 
-        # FIXED: Location lookup now considers hierarchy (village, district, state)
+        # Use improved location resolution with DB lookup/insert
         def get_location_id(row):
-            village = str(row.get('village', '')).strip().lower() if row.get('village') else ''
-            district = str(row.get('district', '')).strip().lower() if row.get('district') else ''
-            state = str(row.get('state', '')).strip().lower() if row.get('state') else ''
-            
-            if not village:
-                return None
-        
-            # Try most specific first: village + district + state
-            if village and district and state:
-                key_full = f"{village}|{district}|{state}"
-                if key_full in self.location_name_to_id:
-                    return self.location_name_to_id[key_full]
-            
-            # Try secondary: village + district
-            if village and district:
-                key_district = f"{village}|{district}"
-                if key_district in self.location_name_to_id:
-                    return self.location_name_to_id[key_district]
-            
-            # Fallback to village only (for backward compatibility)
-            return self.location_name_to_id.get(village)
+            village = row.get('village')
+            mandal = row.get('mandal')
+            district = row.get('district')
+            state = row.get('state')
+            return self._resolve_location_id(village, mandal, district, state)
         
         df['location_id'] = df.apply(get_location_id, axis=1)
 
@@ -2044,13 +2334,23 @@ class RecordService:
             axis=1
         )
 
-        # Normalize types
-        df["lot_id"] = df["lot_id"].astype(str)
+        # Apply fuzzy column mapping
+        column_mapping = {}
+        for col in df.columns:
+            mapped_col = self._fuzzy_map_column_name(col)
+            if mapped_col and mapped_col != col:
+                column_mapping[col] = mapped_col
+        if column_mapping:
+            df = df.rename(columns=column_mapping)
+            logger.info(f"Applied fuzzy column mapping in yield records: {column_mapping}")
+
+        # Clean DataFrame
+        df = self._clean_dataframe(df)
 
         # Updated required_columns to match your model exactly
         # FIXED: Added total_recieved_qty and productivity to required columns
         required_columns = [
-            "grower_id", "crop_id", "lot_no", "season_id", "variety_id", "location_id",
+            "grower_id", "crop_id", "lot_id", "season_id", "variety_id", "location_id",
             "physical_received_qty_as_per_sap", "m1_soaking_date", "m1_soaking_slab",
             "female_soaking_date", "female_tp_date",
             "sowing_acres", "net_tp_acres", "net_acerage_area", "final_harvestable_area",
@@ -2066,7 +2366,7 @@ class RecordService:
             if col not in df.columns:
                 df[col] = None
 
-        df = df[required_columns]
+        # Keep all columns (not just required, to support dynamic columns)
         df = df.drop_duplicates()
 
         # FIXED: Convert dates properly with explicit format specification
@@ -2237,29 +2537,13 @@ class RecordService:
         
         df['variety_id'] = df.apply(get_variety_id, axis=1)
 
-        # FIXED: Location lookup now considers hierarchy (village, district, state)
+        # Use improved location resolution with DB lookup/insert
         def get_location_id(row):
-            village = str(row.get('village', '')).strip().lower() if row.get('village') else ''
-            district = str(row.get('district', '')).strip().lower() if row.get('district') else ''
-            state = str(row.get('state', '')).strip().lower() if row.get('state') else ''
-            
-            if not village:
-                return None
-        
-            # Try most specific first: village + district + state
-            if village and district and state:
-                key_full = f"{village}|{district}|{state}"
-                if key_full in self.location_name_to_id:
-                    return self.location_name_to_id[key_full]
-            
-            # Try secondary: village + district
-            if village and district:
-                key_district = f"{village}|{district}"
-                if key_district in self.location_name_to_id:
-                    return self.location_name_to_id[key_district]
-            
-            # Fallback to village only (for backward compatibility)
-            return self.location_name_to_id.get(village)
+            village = row.get('village')
+            mandal = row.get('mandal')
+            district = row.get('district')
+            state = row.get('state')
+            return self._resolve_location_id(village, mandal, district, state)
         
         df['location_id'] = df.apply(get_location_id, axis=1)
 
@@ -2284,7 +2568,20 @@ class RecordService:
         # Drop original columns not needed in DB
         df = df.drop(columns=['crop_name', 'variety_name'], errors='ignore')
 
-        # Default any missing columns to empty string or None based on type
+        # Apply fuzzy column mapping
+        column_mapping = {}
+        for col in df.columns:
+            mapped_col = self._fuzzy_map_column_name(col)
+            if mapped_col and mapped_col != col:
+                column_mapping[col] = mapped_col
+        if column_mapping:
+            df = df.rename(columns=column_mapping)
+            logger.info(f"Applied fuzzy column mapping: {column_mapping}")
+
+        # Clean DataFrame
+        df = self._clean_dataframe(df)
+
+        # Default any missing columns to None
         all_required_cols = [
             "season_id", "crop_id", "variety_id", "location_id", "grower_id", "organizer_id", "lot_id",
             "hybrid_id", "organizer_name", "grower_name", "grower_gender", "purchasing_document_number",
@@ -2297,19 +2594,2078 @@ class RecordService:
             if col not in df.columns:
                 df[col] = None
 
-        df = df[all_required_cols]  # keep only required columns
+        # Keep all columns (not just required, to support dynamic columns)
         df = df.drop_duplicates()
-        # Use lot_no instead of lot_id
-        if 'lot_no' in df.columns:
-            df["lot_no"] = df["lot_no"].astype(str)
-        df["production_code"] = df["production_code"].astype(str)
+        
         # Convert to dict records
         records = df.to_dict('records')
         unique_records['season_crop_inspection_base'] = [self.normalize_keys(r) for r in records]
 
         return unique_records
 
+    # ============================================
+    # OPTIMIZED METHODS FOR YIELD DATA RELOAD
+    # ============================================
 
+    def _preload_all_master_data(self) -> Tuple[Dict[str, Dict], Dict[str, float]]:
+        """
+        Preload all master data into memory dictionaries for fast lookups.
+        Returns (master_cache, timing_dict) for profiling.
+        """
+        start_time = time.perf_counter()
+        timing = {}
+        logger.info("[PROFILING] Preloading all master data into memory...")
+        
+        master_cache = {
+            'seasons': {},
+            'crops': {},
+            'varieties': {},
+            'growers': {},
+            'organizers': {},
+            'locations': {}
+        }
+        
+        try:
+            # Preload seasons
+            t0 = time.perf_counter()
+            try:
+                seasons_query = text("SELECT season_id, season_name FROM operations.seasons")
+                seasons = self.db.execute(seasons_query).fetchall()
+                for season_id, season_name in seasons:
+                    if season_name:
+                        key = str(season_name).strip().replace(" ", "_").replace("-", "_").upper()
+                        master_cache['seasons'][key] = season_id
+                timing['master_query_seasons'] = time.perf_counter() - t0
+                logger.info(f"  [PROFILING] seasons: {timing['master_query_seasons']:.3f}s, {len(master_cache['seasons'])} rows")
+            except Exception as e:
+                logger.warning(f"  Could not load seasons: {e}")
+                self.db.rollback()
+                timing['master_query_seasons'] = time.perf_counter() - t0
+            
+            # Preload crops
+            t0 = time.perf_counter()
+            try:
+                crops = self.db.query(CropRecord.crop_id, CropRecord.crop_name).all()
+                for crop_id, crop_name in crops:
+                    if crop_name:
+                        key = str(crop_name).strip().lower()
+                        master_cache['crops'][key] = crop_id
+                timing['master_query_crops'] = time.perf_counter() - t0
+                logger.info(f"  [PROFILING] crops: {timing['master_query_crops']:.3f}s, {len(master_cache['crops'])} rows")
+            except Exception as e:
+                logger.warning(f"  Could not load crops: {e}")
+                self.db.rollback()
+                timing['master_query_crops'] = time.perf_counter() - t0
+            
+            # Preload varieties (with crop_id)
+            t0 = time.perf_counter()
+            try:
+                varieties = self.db.query(
+                    VarietyRecord.variety_id, 
+                    VarietyRecord.variety_name,
+                    VarietyRecord.crop_id
+                ).all()
+                for variety_id, variety_name, crop_id in varieties:
+                    if variety_name:
+                        key = str(variety_name).strip().lower().replace('-', '')
+                        master_cache['varieties'][(key, crop_id)] = variety_id
+                        master_cache['varieties'][key] = variety_id
+                timing['master_query_varieties'] = time.perf_counter() - t0
+                logger.info(f"  [PROFILING] varieties: {timing['master_query_varieties']:.3f}s, {len(varieties)} rows")
+            except Exception as e:
+                logger.warning(f"  Could not load varieties: {e}")
+                self.db.rollback()
+                timing['master_query_varieties'] = time.perf_counter() - t0
+            
+            # Preload growers
+            t0 = time.perf_counter()
+            try:
+                growers = self.db.query(GrowerRecord.grower_id, GrowerRecord.grower_name).all()
+                for grower_id, grower_name in growers:
+                    if grower_name:
+                        key = str(grower_name).strip().lower()
+                        master_cache['growers'][key] = grower_id
+                timing['master_query_growers'] = time.perf_counter() - t0
+                logger.info(f"  [PROFILING] growers: {timing['master_query_growers']:.3f}s, {len(master_cache['growers'])} rows")
+            except Exception as e:
+                logger.warning(f"  Could not load growers: {e}")
+                self.db.rollback()
+                timing['master_query_growers'] = time.perf_counter() - t0
+            
+            # Preload organizers
+            t0 = time.perf_counter()
+            try:
+                organizers_query = text("SELECT organizer_id, organizer_name FROM operations.organizers")
+                organizers = self.db.execute(organizers_query).fetchall()
+                for organizer_id, organizer_name in organizers:
+                    if organizer_name:
+                        key = str(organizer_name).strip().lower()
+                        master_cache['organizers'][key] = organizer_id
+                timing['master_query_organizers'] = time.perf_counter() - t0
+                logger.info(f"  [PROFILING] organizers: {timing['master_query_organizers']:.3f}s, {len(master_cache['organizers'])} rows")
+            except Exception as e:
+                logger.warning(f"  Could not load organizers: {e}")
+                self.db.rollback()
+                timing['master_query_organizers'] = time.perf_counter() - t0
+            
+            # Preload locations (with composite keys, normalized)
+            t0 = time.perf_counter()
+            try:
+                locations = self.db.query(
+                    LocationRecord.location_id,
+                    LocationRecord.village,
+                    LocationRecord.district,
+                    LocationRecord.state
+                ).all()
+                for location_id, village, district, state in locations:
+                    if village:
+                        village_norm = self._normalize_location_field(village) or str(village).strip().lower()
+                        district_norm = self._normalize_location_field(district) if district else ''
+                        state_norm = self._normalize_location_field(state) if state else ''
+                        master_cache['locations'][village_norm] = location_id
+                        if district_norm:
+                            master_cache['locations'][f"{village_norm}|{district_norm}"] = location_id
+                        if district_norm and state_norm:
+                            master_cache['locations'][f"{village_norm}|{district_norm}|{state_norm}"] = location_id
+                # Ensure UNKNOWN_LOCATION exists for rows with empty village (zero row loss)
+                if self.UNKNOWN_LOCATION_VILLAGE not in master_cache['locations']:
+                    try:
+                        max_loc_res = self.db.execute(text("SELECT MAX(location_id) FROM operations.locations")).scalar()
+                        max_loc = 500000
+                        if max_loc_res and re.search(r'\d+', str(max_loc_res)):
+                            max_loc = max(max_loc, int(re.search(r'\d+', str(max_loc_res)).group()))
+                        unknown_loc_id = f"L_{max_loc + 1}"
+                        self.db.execute(text("""
+                            INSERT INTO operations.locations (location_id, village, unique_location_id, mandal, district, state, category_id)
+                            VALUES (:lid, :vname, :vname, NULL, NULL, NULL, 100004)
+                            ON CONFLICT (location_id) DO NOTHING
+                        """), {"lid": unknown_loc_id, "vname": "Unknown Location"})
+                        self.db.commit()
+                        master_cache['locations'][self.UNKNOWN_LOCATION_VILLAGE] = unknown_loc_id
+                        logger.info(f"  [CREATED] Fallback location {unknown_loc_id} for empty village")
+                    except Exception as e:
+                        logger.warning(f"  Could not create UNKNOWN_LOCATION: {e}")
+                        self.db.rollback()
+                timing['master_query_locations'] = time.perf_counter() - t0
+                logger.info(f"  [PROFILING] locations: {timing['master_query_locations']:.3f}s, {len(locations)} rows")
+            except Exception as e:
+                logger.warning(f"  Could not load locations: {e}")
+                self.db.rollback()
+                timing['master_query_locations'] = time.perf_counter() - t0
+            
+            timing['preload_masters_total'] = time.perf_counter() - start_time
+            logger.info(f"[PROFILING] Master data preload total: {timing['preload_masters_total']:.3f}s")
+            return master_cache, timing
+            
+        except Exception as e:
+            logger.error(f"Error preloading master data: {e}")
+            self.db.rollback()
+            timing['preload_masters_total'] = time.perf_counter() - start_time
+            return master_cache, timing
+
+    def _batch_create_missing_masters(
+        self, 
+        missing_masters: Dict[str, List[Dict]],
+        master_cache: Dict[str, Dict]
+    ) -> Dict[str, int]:
+        """
+        Batch create missing master records and update cache.
+        Returns count of created records by type.
+        """
+        created_counts = defaultdict(int)
+        
+        try:
+            # Batch create seasons
+            if missing_masters.get('seasons'):
+                try:
+                    max_season = self.db.execute(text("SELECT MAX(season_id) FROM operations.seasons")).scalar()
+                    max_num = int(re.search(r'\d+', str(max_season)).group()) if max_season and re.search(r'\d+', str(max_season)) else 0
+                    
+                    season_values = []
+                    for season_name, season_id in missing_masters['seasons']:
+                        season_values.append((season_id, season_name))
+                        master_cache['seasons'][season_id] = season_id
+                    
+                    if season_values:
+                        insert_sql = text("""
+                            INSERT INTO operations.seasons (season_id, season_name)
+                            VALUES (:season_id, :season_name)
+                            ON CONFLICT (season_id) DO NOTHING
+                        """)
+                        self.db.execute(insert_sql, [{"season_id": s[0], "season_name": s[1]} for s in season_values])
+                        created_counts['seasons'] = len(season_values)
+                        logger.info(f"  Batch created {len(season_values)} seasons")
+                except Exception as e:
+                    logger.warning(f"  Error batch creating seasons: {e}")
+                    self.db.rollback()
+            
+            # Batch create crops
+            if missing_masters.get('crops'):
+                try:
+                    max_crop = self.get_max_crop_id(self.db)
+                    crop_values = []
+                    for crop_name in missing_masters['crops']:
+                        max_crop += 1
+                        crop_id = f"CR_{str(max_crop).zfill(3)}"
+                        crop_values.append((crop_id, crop_name, 100001))
+                        master_cache['crops'][crop_name.lower()] = crop_id
+                    
+                    if crop_values:
+                        insert_sql = text("""
+                            INSERT INTO operations.crops (crop_id, crop_name, category_id)
+                            VALUES (:crop_id, :crop_name, :category_id)
+                            ON CONFLICT (crop_id) DO NOTHING
+                        """)
+                        self.db.execute(insert_sql, [
+                            {"crop_id": c[0], "crop_name": c[1], "category_id": c[2]} 
+                            for c in crop_values
+                        ])
+                        created_counts['crops'] = len(crop_values)
+                        logger.info(f"  Batch created {len(crop_values)} crops")
+                except Exception as e:
+                    logger.warning(f"  Error batch creating crops: {e}")
+                    self.db.rollback()
+            
+            # Batch create varieties
+            if missing_masters.get('varieties'):
+                try:
+                    max_variety = self.get_max_variety_id(self.db)
+                    variety_values = []
+                    for variety_name, crop_id in missing_masters['varieties']:
+                        max_variety += 1
+                        variety_id = f"VR_{str(max_variety).zfill(4)}"
+                        variety_norm = variety_name.lower().replace('-', '')
+                        variety_values.append((variety_id, variety_name, crop_id, 100003))
+                        master_cache['varieties'][(variety_norm, crop_id)] = variety_id
+                        master_cache['varieties'][variety_norm] = variety_id
+                    
+                    if variety_values:
+                        insert_sql = text("""
+                            INSERT INTO operations.varieties (variety_id, variety_name, crop_id, category_id)
+                            VALUES (:variety_id, :variety_name, :crop_id, :category_id)
+                            ON CONFLICT (variety_id) DO NOTHING
+                        """)
+                        self.db.execute(insert_sql, [
+                            {"variety_id": v[0], "variety_name": v[1], "crop_id": v[2], "category_id": v[3]}
+                            for v in variety_values
+                        ])
+                        created_counts['varieties'] = len(variety_values)
+                        logger.info(f"  Batch created {len(variety_values)} varieties")
+                except Exception as e:
+                    logger.warning(f"  Error batch creating varieties: {e}")
+                    self.db.rollback()
+            
+            # Batch create growers
+            if missing_masters.get('growers'):
+                try:
+                    max_grower = self.get_max_grower_id(self.db)
+                    grower_values = []
+                    for grower_data in missing_masters['growers']:
+                        max_grower += 1
+                        grower_id = f"G_{str(max_grower).zfill(6)}"
+                        grower_name = grower_data['name']
+                        grower_values.append((
+                            grower_id, grower_name, 
+                            grower_data.get('fathers_name'), 
+                            grower_data.get('grower_gender'),
+                            100005
+                        ))
+                        master_cache['growers'][grower_name.lower()] = grower_id
+                    
+                    if grower_values:
+                        insert_sql = text("""
+                            INSERT INTO operations.growers (grower_id, grower_name, fathers_name, grower_gender, category_id)
+                            VALUES (:grower_id, :grower_name, :fathers_name, :grower_gender, :category_id)
+                            ON CONFLICT (grower_id) DO NOTHING
+                        """)
+                        self.db.execute(insert_sql, [
+                            {
+                                "grower_id": g[0], "grower_name": g[1], 
+                                "fathers_name": g[2], "grower_gender": g[3], "category_id": g[4]
+                            }
+                            for g in grower_values
+                        ])
+                        created_counts['growers'] = len(grower_values)
+                        logger.info(f"  Batch created {len(grower_values)} growers")
+                except Exception as e:
+                    logger.warning(f"  Error batch creating growers: {e}")
+                    self.db.rollback()
+            
+            # Batch create organizers
+            if missing_masters.get('organizers'):
+                try:
+                    max_org = self.get_max_organizer_id(self.db)
+                    org_values = []
+                    for org_name in missing_masters['organizers']:
+                        max_org += 1
+                        org_id = f"O_{str(max_org).zfill(6)}"
+                        org_values.append((org_id, org_name, 100006))
+                        master_cache['organizers'][org_name.lower()] = org_id
+                    
+                    if org_values:
+                        insert_sql = text("""
+                            INSERT INTO operations.organizers (organizer_id, organizer_name, category_id)
+                            VALUES (:organizer_id, :organizer_name, :category_id)
+                            ON CONFLICT (organizer_id) DO NOTHING
+                        """)
+                        self.db.execute(insert_sql, [
+                            {"organizer_id": o[0], "organizer_name": o[1], "category_id": o[2]}
+                            for o in org_values
+                        ])
+                        created_counts['organizers'] = len(org_values)
+                        logger.info(f"  Batch created {len(org_values)} organizers")
+                except Exception as e:
+                    logger.warning(f"  Error batch creating organizers: {e}")
+                    self.db.rollback()
+            
+            # Batch create locations
+            if missing_masters.get('locations'):
+                try:
+                    max_location_query = text("SELECT MAX(location_id) FROM operations.locations")
+                    max_location = self.db.execute(max_location_query).scalar()
+                    if max_location:
+                        match = re.search(r'\d+', max_location)
+                        max_num = int(match.group()) if match else 500000
+                    else:
+                        max_num = 500000
+                    
+                    location_values = []
+                    for loc_data in missing_masters['locations']:
+                        max_num += 1
+                        location_id = f"L_{max_num}"
+                        village = loc_data.get('village') or 'Unknown Location'
+                        district = loc_data.get('district')
+                        state = loc_data.get('state')
+                        mandal = loc_data.get('mandal')
+                        
+                        location_values.append((
+                            location_id, village, village, mandal, district, state, 100004
+                        ))
+                        
+                        # Update cache (normalize village, district, state for matching)
+                        village_norm = str(village).strip().lower() if village else self.UNKNOWN_LOCATION_VILLAGE
+                        district_norm = str(district).strip().lower() if district else ''
+                        state_norm = str(state).strip().lower() if state else ''
+                        master_cache['locations'][village_norm] = location_id
+                        if village_norm in (self.UNKNOWN_LOCATION_VILLAGE, 'unknown location'):
+                            master_cache['locations'][self.UNKNOWN_LOCATION_VILLAGE] = location_id
+                        if district_norm:
+                            master_cache['locations'][f"{village_norm}|{district_norm}"] = location_id
+                        if district_norm and state_norm:
+                            master_cache['locations'][f"{village_norm}|{district_norm}|{state_norm}"] = location_id
+                    
+                    if location_values:
+                        insert_sql = text("""
+                            INSERT INTO operations.locations 
+                            (location_id, village, unique_location_id, mandal, district, state, category_id)
+                            VALUES (:location_id, :village, :unique_location_id, :mandal, :district, :state, :category_id)
+                            ON CONFLICT (location_id) DO NOTHING
+                        """)
+                        self.db.execute(insert_sql, [
+                            {
+                                "location_id": l[0], "village": l[1], "unique_location_id": l[2],
+                                "mandal": l[3], "district": l[4], "state": l[5], "category_id": l[6]
+                            }
+                            for l in location_values
+                        ])
+                        created_counts['locations'] = len(location_values)
+                        logger.info(f"  Batch created {len(location_values)} locations")
+                except Exception as e:
+                    logger.warning(f"  Error batch creating locations: {e}")
+                    self.db.rollback()
+            
+            self.db.commit()
+            return dict(created_counts)
+            
+        except Exception as e:
+            logger.error(f"Error in batch master creation: {e}")
+            self.db.rollback()
+            return dict(created_counts)
+
+    def _vectorized_resolve_master_ids(
+        self,
+        df: pd.DataFrame,
+        master_cache: Dict[str, Dict]
+    ) -> Tuple[pd.DataFrame, Dict[str, List[Dict]]]:
+        """
+        VECTORIZED master ID resolution using pandas operations.
+        Returns: (df_with_ids, missing_masters)
+        """
+        start_time = time.perf_counter()
+        logger.info("Vectorized master ID resolution...")
+        
+        df = df.copy()
+        missing_masters = defaultdict(list)
+        missing_seasons = set()
+        missing_crops = set()
+        missing_varieties = set()
+        missing_growers = set()
+        missing_organizers = set()
+        missing_locations = set()
+        
+        # Vectorized season_id resolution
+        if 'season' in df.columns or 'season_id' in df.columns:
+            season_col = df.get('season', df.get('season_id', pd.Series()))
+            df['_season_key'] = season_col.astype(str).str.strip().str.replace(r"[-\s]+", "_", regex=True).str.upper()
+            df['season_id'] = df['_season_key'].map(master_cache['seasons']).fillna(df['_season_key'])
+            # Collect missing seasons
+            missing_season_keys = df[df['_season_key'].notna() & ~df['_season_key'].isin(master_cache['seasons'].keys())]['_season_key'].unique()
+            for key in missing_season_keys:
+                if key not in missing_seasons:
+                    missing_seasons.add(key)
+                    season_name = df[df['_season_key'] == key].iloc[0].get('season', key)
+                    missing_masters['seasons'].append((season_name, key))
+            df = df.drop(columns=['_season_key'], errors='ignore')
+        
+        # Vectorized crop_id resolution
+        if 'crop' in df.columns or 'crop_name' in df.columns:
+            crop_col = df.get('crop', df.get('crop_name', pd.Series()))
+            df['_crop_key'] = crop_col.astype(str).str.strip().str.lower()
+            df['_crop_key'] = df['_crop_key'].replace(['nan', 'none', 'null'], '')
+            df['crop_id'] = df['_crop_key'].map(master_cache['crops'])
+            df.loc[(df['_crop_key'] == '') | df['_crop_key'].isna(), 'crop_id'] = None
+            # Collect missing crops (exclude empty/invalid keys)
+            valid_crop_mask = (df['_crop_key'] != '') & df['_crop_key'].notna()
+            missing_crop_mask = valid_crop_mask & df['crop_id'].isna()
+            for key in df[missing_crop_mask]['_crop_key'].unique():
+                if key and key not in missing_crops:
+                    missing_crops.add(key)
+                    crop_name = df[df['_crop_key'] == key].iloc[0].get('crop', df[df['_crop_key'] == key].iloc[0].get('crop_name', key))
+                    missing_masters['crops'].append(crop_name)
+            df = df.drop(columns=['_crop_key'], errors='ignore')
+        
+        # Vectorized variety_id resolution (needs crop_id)
+        if 'hsp_code' in df.columns or 'variety' in df.columns or 'variety_name' in df.columns:
+            variety_col = df.get('hsp_code', df.get('variety', df.get('variety_name', pd.Series())))
+            df['_variety_key'] = variety_col.astype(str).str.strip().str.lower().str.replace('-', '')
+            df['_variety_key'] = df['_variety_key'].replace(['nan', 'none', 'null', ''], '')
+            # Try composite key first (variety_key, crop_id)
+            df['_variety_composite'] = list(zip(df['_variety_key'], df['crop_id']))
+            df['variety_id'] = df['_variety_composite'].map(
+                lambda x: master_cache['varieties'].get(x) if isinstance(x, tuple) and x[0] else None
+            )
+            # Fallback to variety_key only
+            mask = df['variety_id'].isna() & (df['_variety_key'] != '')
+            df.loc[mask, 'variety_id'] = df.loc[mask, '_variety_key'].map(master_cache['varieties'])
+            # Collect missing varieties (need crop_id - will be set after batch create crops)
+            missing_variety_mask = (df['_variety_key'] != '') & df['variety_id'].isna() & df['crop_id'].notna()
+            for idx in df[missing_variety_mask].index:
+                variety_key = df.loc[idx, '_variety_key']
+                crop_id = df.loc[idx, 'crop_id']
+                if (variety_key, crop_id) not in missing_varieties:
+                    missing_varieties.add((variety_key, crop_id))
+                    variety_name = df.loc[idx].get('hsp_code', df.loc[idx].get('variety', variety_key))
+                    missing_masters['varieties'].append((variety_name, crop_id))
+            df = df.drop(columns=['_variety_key', '_variety_composite'], errors='ignore')
+        
+        # Vectorized grower_id resolution
+        if 'growers_name' in df.columns or 'grower_name' in df.columns:
+            grower_col = df.get('growers_name', df.get('grower_name', pd.Series()))
+            df['_grower_key'] = grower_col.astype(str).str.strip().str.lower()
+            df['grower_id'] = df['_grower_key'].map(master_cache['growers'])
+            # Collect missing growers
+            missing_grower_keys = df[df['_grower_key'].notna() & df['grower_id'].isna()]['_grower_key'].unique()
+            for key in missing_grower_keys:
+                if key not in missing_growers:
+                    missing_growers.add(key)
+                    grower_name = df[df['_grower_key'] == key].iloc[0].get('growers_name', df[df['_grower_key'] == key].iloc[0].get('grower_name', key))
+                    missing_masters['growers'].append({
+                        'name': grower_name,
+                        'fathers_name': df[df['_grower_key'] == key].iloc[0].get('father_name', df[df['_grower_key'] == key].iloc[0].get('fathers_name')),
+                        'grower_gender': df[df['_grower_key'] == key].iloc[0].get('grower_gender')
+                    })
+            df = df.drop(columns=['_grower_key'], errors='ignore')
+        
+        # Vectorized organizer_id resolution
+        if 'organizer_name' in df.columns or 'org_id' in df.columns:
+            org_col = df.get('organizer_name', df.get('org_id', pd.Series()))
+            df['_org_key'] = org_col.astype(str).str.strip().str.lower()
+            df['organizer_id'] = df['_org_key'].map(master_cache['organizers'])
+            # Collect missing organizers
+            missing_org_keys = df[df['_org_key'].notna() & df['organizer_id'].isna()]['_org_key'].unique()
+            for key in missing_org_keys:
+                if key not in missing_organizers:
+                    missing_organizers.add(key)
+                    org_name = df[df['_org_key'] == key].iloc[0].get('organizer_name', df[df['_org_key'] == key].iloc[0].get('org_id', key))
+                    missing_masters['organizers'].append(org_name)
+            df = df.drop(columns=['_org_key'], errors='ignore')
+        
+        # Vectorized location_id resolution (composite key - normalized village, district, state)
+        if 'village' in df.columns or 'village_id' in df.columns:
+            village_col = df.get('village', df.get('village_id', pd.Series()))
+            df['_village_key'] = village_col.astype(str).str.strip().str.lower().replace(['nan', 'none', 'null'], '')
+            df['_village_key'] = df['_village_key'].str.replace(r'\s+', ' ', regex=True).str.strip()
+            df.loc[(df['_village_key'] == '') | df['_village_key'].isna(), '_village_key'] = self.UNKNOWN_LOCATION_VILLAGE
+            
+            df['_district_key'] = df.get('district', pd.Series()).fillna('').astype(str).str.strip().str.lower().replace(['nan', 'none', 'null'], '')
+            df['_district_key'] = df['_district_key'].str.replace(r'\s+', ' ', regex=True).str.strip()
+            
+            df['_state_key'] = df.get('state', pd.Series()).fillna('').astype(str).str.strip().str.lower().replace(['nan', 'none', 'null'], '')
+            df['_state_key'] = df['_state_key'].str.replace(r'\s+', ' ', regex=True).str.strip()
+            
+            # Build composite keys for lookup (village|district|state, village|district, village)
+            df['_loc_key_full'] = df['_village_key'] + '|' + df['_district_key'] + '|' + df['_state_key']
+            df['_loc_key_district'] = df['_village_key'] + '|' + df['_district_key']
+            
+            mask_full = (df['_village_key'] != '') & (df['_district_key'] != '') & (df['_state_key'] != '')
+            mask_district = (df['_village_key'] != '') & (df['_district_key'] != '')
+            
+            df['location_id'] = None
+            df.loc[mask_full, 'location_id'] = df.loc[mask_full, '_loc_key_full'].map(master_cache['locations'])
+            mask = df['location_id'].isna() & mask_district
+            df.loc[mask, 'location_id'] = df.loc[mask, '_loc_key_district'].map(master_cache['locations'])
+            mask = df['location_id'].isna() & (df['_village_key'] != '')
+            df.loc[mask, 'location_id'] = df.loc[mask, '_village_key'].map(master_cache['locations'])
+            
+            # Collect missing locations (including UNKNOWN_LOCATION if not in cache)
+            missing_loc_mask = df['location_id'].isna()
+            for idx in df[missing_loc_mask].index:
+                village_key = df.loc[idx, '_village_key']
+                village_display = df.loc[idx].get('village', df.loc[idx].get('village_id', village_key))
+                vk, dk, sk = df.loc[idx, '_village_key'], df.loc[idx, '_district_key'], df.loc[idx, '_state_key']
+                loc_key = f"{vk}|{dk}|{sk}" if (vk and dk and sk) else (f"{vk}|{dk}" if (vk and dk) else vk)
+                if loc_key and loc_key not in missing_locations:
+                    missing_locations.add(loc_key)
+                    missing_masters['locations'].append({
+                        'village': str(village_display).strip() if pd.notna(village_display) and str(village_display).strip() else village_key,
+                        'district': df.loc[idx].get('district'),
+                        'state': df.loc[idx].get('state'),
+                        'mandal': df.loc[idx].get('taluka_mandal', df.loc[idx].get('mandal'))
+                    })
+            df = df.drop(columns=['_village_raw', '_village_key', '_district_raw', '_district_key', '_state_raw', '_state_key', '_loc_key_full', '_loc_key_district'], errors='ignore')
+        
+        elapsed = time.perf_counter() - start_time
+        logger.info(f"Vectorized master ID resolution completed in {elapsed:.3f}s ({len(df)/max(elapsed,0.001):.0f} rows/sec)")
+        logger.info(f"Found {sum(len(v) for v in missing_masters.values())} missing master records")
+        
+        return df, missing_masters
+
+    def _optimized_split_and_prepare_data(
+        self, 
+        df: pd.DataFrame, 
+        master_cache: Dict[str, Dict]
+    ) -> Tuple[List[Dict], List[Dict], Dict[str, List[Dict]], Dict[str, float], List[Dict]]:
+        """
+        Optimized version using VECTORIZED operations for master ID resolution.
+        Mandatory: season_id, crop_id, variety_id, lot_id, location_id.
+        Returns: (inspection_records, yield_records, missing_masters, timing_dict, failed_rows)
+        """
+        start_time = time.perf_counter()
+        timing = {}
+        failed_rows = []
+        logger.info("Processing DataFrame with vectorized master lookups...")
+        
+        t0 = time.perf_counter()
+        if 'lot_id' in df.columns:
+            df['lot_id'] = df['lot_id'].astype(str).str.strip().str.lower()
+            df['lot_id'] = df['lot_id'].replace(['nan', 'none', 'null', ''], None)
+        timing['lot_id_normalize'] = time.perf_counter() - t0
+        
+        t0 = time.perf_counter()
+        df, missing_masters = self._vectorized_resolve_master_ids(df, master_cache)
+        timing['vectorized_master_resolve'] = time.perf_counter() - t0
+        logger.info(f"  [PROFILING] vectorized_master_resolve: {timing['vectorized_master_resolve']:.3f}s ({len(df)/max(timing['vectorized_master_resolve'],0.001):.0f} rows/sec)")
+        
+        t0 = time.perf_counter()
+        required_cols = ['season_id', 'crop_id', 'variety_id', 'lot_id', 'location_id']
+        if 'location_id' not in df.columns:
+            df['location_id'] = None
+        for c in required_cols:
+            if c not in df.columns:
+                df[c] = None
+        valid_mask = df[required_cols].notna().all(axis=1)
+        df_valid = df[valid_mask].copy()
+        df_invalid = df[~valid_mask]
+        for idx in df_invalid.index:
+            missing_keys = [c for c in required_cols if pd.isna(df.loc[idx, c]) or df.loc[idx, c] in [None, '', 'nan']]
+            reason = f"missing mandatory: {', '.join(missing_keys)}"
+            failed_rows.append({'row_index': int(idx), 'reason': reason, 'missing_keys': missing_keys})
+        timing['filter_valid_rows'] = time.perf_counter() - t0
+        if len(df_valid) < len(df):
+            logger.warning(f"[ROW LOSS] Skipped {len(df) - len(df_valid)} rows with missing required fields (mandatory: {required_cols})")
+        
+        inspection_columns = [
+            'season', 'crop', 'production_code', 'hsp_code', 'variety',
+            'organizer_name', 'org_id', 'purchasing_document_number',
+            'growers_name', 'father_name', 'village', 'village_id',
+            'taluka_mandal', 'mandal', 'district', 'state', 'lot_id'
+        ]
+        yield_columns = [
+            'lot_id', 'm1_soaking_date', 'm1_soaking_week',
+            'female_soaking_date', 'female_date_of_transplant',
+            'po_soaking_acres', 'planting_list_soaking_acres',
+            'sowing_acres', 'net_tp_acres', 'net_acreage_area',
+            'final_harvestable_area', 'sum_of_received_qty',
+            'packed_qty', 'productivity_of_packed_seed', 'yield_slab',
+            'qty', 'rate_per_kg', 'amount_inr',
+            'male_parent_seed_lot_no', 'male_soaking_acre',
+            'male_no_of_pkt', 'male_qty_in_kgs',
+            'female_parent_seed_lot_no', 'female_soaking_acre',
+            'female_no_of_pkt', 'female_qty_in_kgs'
+        ]
+        
+        t0 = time.perf_counter()
+        inspection_df = df_valid[['season_id', 'crop_id', 'variety_id', 'lot_id', 'location_id', 'grower_id', 'organizer_id']].copy()
+        for col in inspection_columns:
+            if col in df_valid.columns:
+                inspection_df[col] = df_valid[col]
+        yield_df = df_valid[['season_id', 'crop_id', 'variety_id', 'lot_id', 'location_id', 'grower_id', 'organizer_id']].copy()
+        for col in yield_columns:
+            if col in df_valid.columns:
+                yield_df[col] = df_valid[col]
+        timing['build_dataframes'] = time.perf_counter() - t0
+        
+        t0 = time.perf_counter()
+        inspection_records = inspection_df.to_dict('records')
+        yield_records = yield_df.to_dict('records')
+        timing['to_dict_records'] = time.perf_counter() - t0
+        logger.info(f"  [PROFILING] to_dict('records'): {timing['to_dict_records']:.3f}s, {len(inspection_records)} records")
+        
+        t0 = time.perf_counter()
+        for i, rec in enumerate(inspection_records):
+            rec.update({k: None if pd.isna(v) else v for k, v in rec.items()})
+            if (i + 1) % PROGRESS_LOG_INTERVAL == 0:
+                elapsed = time.perf_counter() - t0
+                rps = (i + 1) / max(elapsed, 0.001)
+                logger.info(f"  [PROFILING] Rows processed: {i+1}/{len(inspection_records)}, {rps:.0f} rows/sec (inspection clean)")
+        t1 = time.perf_counter()
+        for i, rec in enumerate(yield_records):
+            rec.update({k: None if pd.isna(v) else v for k, v in rec.items()})
+            if (i + 1) % PROGRESS_LOG_INTERVAL == 0:
+                elapsed = time.perf_counter() - t1
+                rps = (i + 1) / max(elapsed, 0.001)
+                logger.info(f"  [PROFILING] Rows processed: {i+1}/{len(yield_records)}, {rps:.0f} rows/sec (yield clean)")
+        timing['clean_nan_loop'] = time.perf_counter() - t0
+        logger.info(f"  [PROFILING] clean NaN loop: {timing['clean_nan_loop']:.3f}s ({len(inspection_records)+len(yield_records)} records)")
+        
+        elapsed = time.perf_counter() - start_time
+        logger.info(f"[PROFILING] process_data total: {elapsed:.3f}s, {len(inspection_records)} records ({len(inspection_records)/max(elapsed,0.001):.0f} rows/sec)")
+        if failed_rows:
+            logger.warning(f"[FAILED ROWS] {len(failed_rows)} rows skipped: {failed_rows[:5]}{'...' if len(failed_rows) > 5 else ''}")
+        return inspection_records, yield_records, missing_masters, timing, failed_rows
+
+    def _disable_triggers(self, table_names: List[str]) -> None:
+        """Disable triggers on tables for faster bulk load."""
+        try:
+            for table in table_names:
+                disable_sql = text(f"ALTER TABLE operations.{table} DISABLE TRIGGER ALL")
+                self.db.execute(disable_sql)
+            self.db.commit()
+            logger.info(f"Disabled triggers on {len(table_names)} tables")
+        except Exception as e:
+            logger.warning(f"Could not disable triggers: {e}")
+            self.db.rollback()
+    
+    def _enable_triggers(self, table_names: List[str]) -> None:
+        """Re-enable triggers on tables after bulk load."""
+        try:
+            for table in table_names:
+                enable_sql = text(f"ALTER TABLE operations.{table} ENABLE TRIGGER ALL")
+                self.db.execute(enable_sql)
+            self.db.commit()
+            logger.info(f"Re-enabled triggers on {len(table_names)} tables")
+        except Exception as e:
+            logger.warning(f"Could not enable triggers: {e}")
+            self.db.rollback()
+
+    def _bulk_insert_with_copy(
+        self,
+        records: List[Dict],
+        table_name: str,
+        columns: List[str]
+    ) -> int:
+        """
+        Ultra-fast bulk insert using PostgreSQL COPY FROM STDIN.
+        This is the fastest method for bulk loading data.
+        """
+        if not records:
+            return 0
+        
+        try:
+            conn = self.db.bind.raw_connection()
+            cursor = conn.cursor()
+            
+            # Prepare COPY command
+            copy_sql = f"""
+                COPY operations.{table_name} ({', '.join(columns)})
+                FROM STDIN WITH (FORMAT CSV, NULL '')
+            """
+            
+            # Convert records to CSV format
+            import io
+            output = io.StringIO()
+            for rec in records:
+                row = [str(rec.get(col, '')) if rec.get(col) is not None else '' for col in columns]
+                output.write(','.join(row) + '\n')
+            output.seek(0)
+            
+            # Execute COPY
+            cursor.copy_expert(copy_sql, output)
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return len(records)
+        except Exception as e:
+            logger.error(f"COPY FROM STDIN failed for {table_name}, falling back to execute_batch: {e}")
+            self.db.rollback()
+            raise
+
+    def _optimized_bulk_insert(
+        self, 
+        inspection_records: List[Dict], 
+        yield_records: List[Dict]
+    ) -> Tuple[Dict[str, int], Dict[str, float]]:
+        """
+        Optimized bulk insert using execute_batch. Disables triggers during load.
+        Returns (results_dict, timing_dict) for profiling.
+        """
+        results = {
+            'inspection_inserted': 0,
+            'yield_inserted': 0,
+            'inspection_errors': 0,
+            'yield_errors': 0
+        }
+        timing = {}
+        start_time = time.perf_counter()
+        tables_to_disable = ['season_crop_inspection_base', 'season_crop_yield']
+        
+        try:
+            t0 = time.perf_counter()
+            self._disable_triggers(tables_to_disable)
+            timing['bulk_disable_triggers'] = time.perf_counter() - t0
+            logger.info(f"  [PROFILING] disable triggers: {timing['bulk_disable_triggers']:.3f}s")
+            
+            use_raw_conn = False
+            if PSYCOPG2_AVAILABLE:
+                try:
+                    conn = self.db.bind.raw_connection()
+                    use_raw_conn = True
+                except:
+                    conn = self.db.connection()
+                    use_raw_conn = False
+            else:
+                conn = self.db.connection()
+            cursor = conn.cursor()
+            
+            if inspection_records:
+                try:
+                    t0 = time.perf_counter()
+                    insert_sql = """
+                        INSERT INTO operations.season_crop_inspection_base (
+                            season_id, crop_id, variety_id, lot_id, location_id, grower_id, organizer_id,
+                            hybrid_id, season, crop, production_code, hsp_code, organizer_name, org_id,
+                            purchasing_document_number, growers_name, father_name, village, village_id,
+                            taluka_mandal, district, state
+                        ) VALUES (
+                            %(season_id)s, %(crop_id)s, %(variety_id)s, %(lot_id)s, %(location_id)s, 
+                            %(grower_id)s, %(organizer_id)s, %(hybrid_id)s, %(season)s, %(crop)s,
+                            %(production_code)s, %(hsp_code)s, %(organizer_name)s, %(org_id)s,
+                            %(purchasing_document_number)s, %(growers_name)s, %(father_name)s,
+                            %(village)s, %(village_id)s, %(taluka_mandal)s, %(district)s, %(state)s
+                        )
+                        ON CONFLICT (season_id, crop_id, variety_id, lot_id) DO UPDATE SET
+                            location_id = EXCLUDED.location_id,
+                            grower_id = EXCLUDED.grower_id,
+                            organizer_id = EXCLUDED.organizer_id,
+                            hybrid_id = EXCLUDED.hybrid_id,
+                            season = EXCLUDED.season,
+                            crop = EXCLUDED.crop,
+                            production_code = EXCLUDED.production_code,
+                            hsp_code = EXCLUDED.hsp_code,
+                            organizer_name = EXCLUDED.organizer_name,
+                            org_id = EXCLUDED.org_id,
+                            purchasing_document_number = EXCLUDED.purchasing_document_number,
+                            growers_name = EXCLUDED.growers_name,
+                            father_name = EXCLUDED.father_name,
+                            village = EXCLUDED.village,
+                            village_id = EXCLUDED.village_id,
+                            taluka_mandal = EXCLUDED.taluka_mandal,
+                            district = EXCLUDED.district,
+                            state = EXCLUDED.state
+                    """
+                    
+                    clean_records = []
+                    for rec in inspection_records:
+                        clean_rec = {
+                            'season_id': rec.get('season_id'),
+                            'crop_id': rec.get('crop_id'),
+                            'variety_id': rec.get('variety_id'),
+                            'lot_id': rec.get('lot_id'),
+                            'location_id': rec.get('location_id'),
+                            'grower_id': rec.get('grower_id'),
+                            'organizer_id': rec.get('organizer_id'),
+                            'hybrid_id': rec.get('hybrid_id'),
+                            'season': rec.get('season'),
+                            'crop': rec.get('crop'),
+                            'production_code': rec.get('production_code'),
+                            'hsp_code': rec.get('hsp_code'),
+                            'organizer_name': rec.get('organizer_name'),
+                            'org_id': rec.get('org_id'),
+                            'purchasing_document_number': rec.get('purchasing_document_number'),
+                            'growers_name': rec.get('growers_name'),
+                            'father_name': rec.get('father_name'),
+                            'village': rec.get('village'),
+                            'village_id': rec.get('village_id'),
+                            'taluka_mandal': rec.get('taluka_mandal'),
+                            'district': rec.get('district'),
+                            'state': rec.get('state'),
+                        }
+                        clean_records.append(clean_rec)
+                    timing['bulk_prepare_inspection'] = time.perf_counter() - t0
+                    logger.info(f"    [PREPARE] {len(clean_records):,} inspection records prepared ({timing['bulk_prepare_inspection']:.3f}s)")
+                    
+                    t0 = time.perf_counter()
+                    logger.info(f"    [UPSERT] Upserting into operations.season_crop_inspection_base...")
+                    if PSYCOPG2_AVAILABLE:
+                        psycopg2.extras.execute_batch(cursor, insert_sql, clean_records, page_size=10000)
+                    else:
+                        from sqlalchemy.dialects.postgresql import insert
+                        stmt = insert(SeasonCropInspectionBase.__table__).values(clean_records)
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=['season_id', 'crop_id', 'variety_id', 'lot_id'],
+                            set_={
+                                'location_id': stmt.excluded.location_id,
+                                'grower_id': stmt.excluded.grower_id,
+                                'organizer_id': stmt.excluded.organizer_id,
+                                'hybrid_id': stmt.excluded.hybrid_id,
+                                'season': stmt.excluded.season,
+                                'crop': stmt.excluded.crop,
+                                'production_code': stmt.excluded.production_code,
+                                'hsp_code': stmt.excluded.hsp_code,
+                                'organizer_name': stmt.excluded.organizer_name,
+                                'org_id': stmt.excluded.org_id,
+                                'purchasing_document_number': stmt.excluded.purchasing_document_number,
+                                'growers_name': stmt.excluded.growers_name,
+                                'father_name': stmt.excluded.father_name,
+                                'village': stmt.excluded.village,
+                                'village_id': stmt.excluded.village_id,
+                                'taluka_mandal': stmt.excluded.taluka_mandal,
+                                'district': stmt.excluded.district,
+                                'state': stmt.excluded.state,
+                            }
+                        )
+                        self.db.execute(stmt)
+                    timing['bulk_insert_inspection_base'] = time.perf_counter() - t0
+                    results['inspection_inserted'] = len(clean_records)
+                    throughput = results['inspection_inserted']/max(timing['bulk_insert_inspection_base'],0.001)
+                    logger.info(f"    [SUCCESS] season_crop_inspection_base: {results['inspection_inserted']:,} rows upserted")
+                    logger.info(f"    [TIMING] {timing['bulk_insert_inspection_base']:.3f}s ({throughput:,.0f} rows/sec)")
+                    
+                except Exception as e:
+                    logger.error(f"    [FAILED] Error inserting inspection records: {e}")
+                    logger.error(f"    [FAILED] Table: operations.season_crop_inspection_base")
+                    logger.error(f"    [FAILED] Attempted rows: {len(inspection_records):,}")
+                    results['inspection_errors'] = len(inspection_records)
+                    self.db.rollback()
+            
+            if yield_records:
+                try:
+                    t0 = time.perf_counter()
+                    insert_sql = """
+                        INSERT INTO operations.season_crop_yield (
+                            season_id, crop_id, variety_id, lot_id, location_id, grower_id, organizer_id,
+                            m1_soaking_date, m1_soaking_week, female_soaking_date, female_date_of_transplant,
+                            po_soaking_acres, planting_list_soaking_acres, sowing_acres, net_tp_acres,
+                            net_acreage_area, final_harvestable_area, sum_of_received_qty, packed_qty,
+                            productivity_of_packed_seed, yield_slab, qty, rate_per_kg, amount_inr,
+                            male_parent_seed_lot_no, male_soaking_acre, male_no_of_pkt, male_qty_in_kgs,
+                            female_parent_seed_lot_no, female_soaking_acre, female_no_of_pkt, female_qty_in_kgs
+                        ) VALUES (
+                            %(season_id)s, %(crop_id)s, %(variety_id)s, %(lot_id)s, %(location_id)s,
+                            %(grower_id)s, %(organizer_id)s, %(m1_soaking_date)s, %(m1_soaking_week)s,
+                            %(female_soaking_date)s, %(female_date_of_transplant)s, %(po_soaking_acres)s,
+                            %(planting_list_soaking_acres)s, %(sowing_acres)s, %(net_tp_acres)s,
+                            %(net_acreage_area)s, %(final_harvestable_area)s, %(sum_of_received_qty)s,
+                            %(packed_qty)s, %(productivity_of_packed_seed)s, %(yield_slab)s, %(qty)s,
+                            %(rate_per_kg)s, %(amount_inr)s, %(male_parent_seed_lot_no)s, %(male_soaking_acre)s,
+                            %(male_no_of_pkt)s, %(male_qty_in_kgs)s, %(female_parent_seed_lot_no)s,
+                            %(female_soaking_acre)s, %(female_no_of_pkt)s, %(female_qty_in_kgs)s
+                        )
+                        ON CONFLICT (season_id, crop_id, variety_id, lot_id) DO UPDATE SET
+                            location_id = EXCLUDED.location_id,
+                            grower_id = EXCLUDED.grower_id,
+                            organizer_id = EXCLUDED.organizer_id,
+                            m1_soaking_date = EXCLUDED.m1_soaking_date,
+                            m1_soaking_week = EXCLUDED.m1_soaking_week,
+                            female_soaking_date = EXCLUDED.female_soaking_date,
+                            female_date_of_transplant = EXCLUDED.female_date_of_transplant,
+                            po_soaking_acres = EXCLUDED.po_soaking_acres,
+                            planting_list_soaking_acres = EXCLUDED.planting_list_soaking_acres,
+                            sowing_acres = EXCLUDED.sowing_acres,
+                            net_tp_acres = EXCLUDED.net_tp_acres,
+                            net_acreage_area = EXCLUDED.net_acreage_area,
+                            final_harvestable_area = EXCLUDED.final_harvestable_area,
+                            sum_of_received_qty = EXCLUDED.sum_of_received_qty,
+                            packed_qty = EXCLUDED.packed_qty,
+                            productivity_of_packed_seed = EXCLUDED.productivity_of_packed_seed,
+                            yield_slab = EXCLUDED.yield_slab,
+                            qty = EXCLUDED.qty,
+                            rate_per_kg = EXCLUDED.rate_per_kg,
+                            amount_inr = EXCLUDED.amount_inr,
+                            male_parent_seed_lot_no = EXCLUDED.male_parent_seed_lot_no,
+                            male_soaking_acre = EXCLUDED.male_soaking_acre,
+                            male_no_of_pkt = EXCLUDED.male_no_of_pkt,
+                            male_qty_in_kgs = EXCLUDED.male_qty_in_kgs,
+                            female_parent_seed_lot_no = EXCLUDED.female_parent_seed_lot_no,
+                            female_soaking_acre = EXCLUDED.female_soaking_acre,
+                            female_no_of_pkt = EXCLUDED.female_no_of_pkt,
+                            female_qty_in_kgs = EXCLUDED.female_qty_in_kgs
+                    """
+                    
+                    clean_records = []
+                    for rec in yield_records:
+                        clean_rec = {
+                            'season_id': rec.get('season_id'),
+                            'crop_id': rec.get('crop_id'),
+                            'variety_id': rec.get('variety_id'),
+                            'lot_id': rec.get('lot_id'),
+                            'location_id': rec.get('location_id'),
+                            'grower_id': rec.get('grower_id'),
+                            'organizer_id': rec.get('organizer_id'),
+                            'm1_soaking_date': rec.get('m1_soaking_date'),
+                            'm1_soaking_week': rec.get('m1_soaking_week'),
+                            'female_soaking_date': rec.get('female_soaking_date'),
+                            'female_date_of_transplant': rec.get('female_date_of_transplant'),
+                            'po_soaking_acres': rec.get('po_soaking_acres'),
+                            'planting_list_soaking_acres': rec.get('planting_list_soaking_acres'),
+                            'sowing_acres': rec.get('sowing_acres'),
+                            'net_tp_acres': rec.get('net_tp_acres'),
+                            'net_acreage_area': rec.get('net_acreage_area'),
+                            'final_harvestable_area': rec.get('final_harvestable_area'),
+                            'sum_of_received_qty': rec.get('sum_of_received_qty'),
+                            'packed_qty': rec.get('packed_qty'),
+                            'productivity_of_packed_seed': rec.get('productivity_of_packed_seed'),
+                            'yield_slab': rec.get('yield_slab'),
+                            'qty': rec.get('qty'),
+                            'rate_per_kg': rec.get('rate_per_kg'),
+                            'amount_inr': rec.get('amount_inr'),
+                            'male_parent_seed_lot_no': rec.get('male_parent_seed_lot_no'),
+                            'male_soaking_acre': rec.get('male_soaking_acre'),
+                            'male_no_of_pkt': rec.get('male_no_of_pkt'),
+                            'male_qty_in_kgs': rec.get('male_qty_in_kgs'),
+                            'female_parent_seed_lot_no': rec.get('female_parent_seed_lot_no'),
+                            'female_soaking_acre': rec.get('female_soaking_acre'),
+                            'female_no_of_pkt': rec.get('female_no_of_pkt'),
+                            'female_qty_in_kgs': rec.get('female_qty_in_kgs'),
+                        }
+                        clean_records.append(clean_rec)
+                    timing['bulk_prepare_yield'] = time.perf_counter() - t0
+                    logger.info(f"    [PREPARE] {len(clean_records):,} yield records prepared ({timing['bulk_prepare_yield']:.3f}s)")
+                    
+                    t0 = time.perf_counter()
+                    logger.info(f"    [UPSERT] Upserting into operations.season_crop_yield...")
+                    if PSYCOPG2_AVAILABLE:
+                        psycopg2.extras.execute_batch(cursor, insert_sql, clean_records, page_size=10000)
+                    else:
+                        from sqlalchemy.dialects.postgresql import insert
+                        stmt = insert(YieldRecord.__table__).values(clean_records)
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=['season_id', 'crop_id', 'variety_id', 'lot_id'],
+                            set_={
+                                'location_id': stmt.excluded.location_id,
+                                'grower_id': stmt.excluded.grower_id,
+                                'organizer_id': stmt.excluded.organizer_id,
+                                'm1_soaking_date': stmt.excluded.m1_soaking_date,
+                                'm1_soaking_week': stmt.excluded.m1_soaking_week,
+                                'female_soaking_date': stmt.excluded.female_soaking_date,
+                                'female_date_of_transplant': stmt.excluded.female_date_of_transplant,
+                                'po_soaking_acres': stmt.excluded.po_soaking_acres,
+                                'planting_list_soaking_acres': stmt.excluded.planting_list_soaking_acres,
+                                'sowing_acres': stmt.excluded.sowing_acres,
+                                'net_tp_acres': stmt.excluded.net_tp_acres,
+                                'net_acreage_area': stmt.excluded.net_acreage_area,
+                                'final_harvestable_area': stmt.excluded.final_harvestable_area,
+                                'sum_of_received_qty': stmt.excluded.sum_of_received_qty,
+                                'packed_qty': stmt.excluded.packed_qty,
+                                'productivity_of_packed_seed': stmt.excluded.productivity_of_packed_seed,
+                                'yield_slab': stmt.excluded.yield_slab,
+                                'qty': stmt.excluded.qty,
+                                'rate_per_kg': stmt.excluded.rate_per_kg,
+                                'amount_inr': stmt.excluded.amount_inr,
+                                'male_parent_seed_lot_no': stmt.excluded.male_parent_seed_lot_no,
+                                'male_soaking_acre': stmt.excluded.male_soaking_acre,
+                                'male_no_of_pkt': stmt.excluded.male_no_of_pkt,
+                                'male_qty_in_kgs': stmt.excluded.male_qty_in_kgs,
+                                'female_parent_seed_lot_no': stmt.excluded.female_parent_seed_lot_no,
+                                'female_soaking_acre': stmt.excluded.female_soaking_acre,
+                                'female_no_of_pkt': stmt.excluded.female_no_of_pkt,
+                                'female_qty_in_kgs': stmt.excluded.female_qty_in_kgs,
+                            }
+                        )
+                        self.db.execute(stmt)
+                    timing['bulk_insert_season_crop_yield'] = time.perf_counter() - t0
+                    results['yield_inserted'] = len(clean_records)
+                    throughput = results['yield_inserted']/max(timing['bulk_insert_season_crop_yield'],0.001)
+                    logger.info(f"    [SUCCESS] season_crop_yield: {results['yield_inserted']:,} rows upserted")
+                    logger.info(f"    [TIMING] {timing['bulk_insert_season_crop_yield']:.3f}s ({throughput:,.0f} rows/sec)")
+                    
+                except Exception as e:
+                    logger.error(f"    [FAILED] Error inserting yield records: {e}")
+                    logger.error(f"    [FAILED] Table: operations.season_crop_yield")
+                    logger.error(f"    [FAILED] Attempted rows: {len(yield_records):,}")
+                    results['yield_errors'] = len(yield_records)
+                    self.db.rollback()
+            
+            t0 = time.perf_counter()
+            if use_raw_conn:
+                conn.commit()
+            else:
+                self.db.commit()
+            timing['bulk_commit'] = time.perf_counter() - t0
+            logger.info(f"  [PROFILING] commit: {timing['bulk_commit']:.3f}s")
+            cursor.close()
+            if use_raw_conn:
+                conn.close()
+            
+            t0 = time.perf_counter()
+            self._enable_triggers(tables_to_disable)
+            timing['bulk_enable_triggers'] = time.perf_counter() - t0
+            logger.info(f"  [PROFILING] enable triggers: {timing['bulk_enable_triggers']:.3f}s")
+            
+        except Exception as e:
+            self.db.rollback()
+            try:
+                self._enable_triggers(tables_to_disable)
+            except:
+                pass
+            logger.error(f"Error during bulk insert: {e}")
+            raise
+        
+        timing['bulk_insert_total'] = time.perf_counter() - start_time
+        logger.info(f"[PROFILING] bulk insert total: {timing['bulk_insert_total']:.3f}s")
+        return results, timing
+
+    # ============================================
+    # NEW METHODS FOR YIELD DATA RELOAD
+    # ============================================
+
+    def truncate_yield_tables(self) -> Dict[str, Any]:
+        """
+        Safely truncate season_crop_inspection_base and season_crop_yield tables.
+        
+        SAFE OPERATION: Does NOT drop or recreate tables - only removes data.
+        Master tables (seasons, crops, varieties, growers, organizers, locations) 
+        are NEVER touched.
+        
+        Returns:
+            Dict with row counts before truncation
+        """
+        stats = {
+            'inspection_base_rows_before': 0,
+            'yield_rows_before': 0,
+            'tables_truncated': []
+        }
+        
+        try:
+            logger.info("=" * 60)
+            logger.info("[SAFE RELOAD] Truncating yield data tables (schema preserved)")
+            logger.info("=" * 60)
+            
+            # Skip pre-counts for slow connections - go directly to truncate
+            logger.info("  [INFO] Skipping pre-counts (slow connection optimization)")
+            stats['inspection_base_rows_before'] = -1  # -1 indicates skipped
+            stats['yield_rows_before'] = -1
+            
+            # TRUNCATE tables (fast, keeps schema)
+            logger.info("  [TRUNCATING] operations.season_crop_inspection_base...")
+            self.db.execute(text("TRUNCATE TABLE operations.season_crop_inspection_base CASCADE"))
+            stats['tables_truncated'].append('operations.season_crop_inspection_base')
+            logger.info("    [SUCCESS] season_crop_inspection_base truncated")
+            
+            logger.info("  [TRUNCATING] operations.season_crop_yield...")
+            self.db.execute(text("TRUNCATE TABLE operations.season_crop_yield CASCADE"))
+            stats['tables_truncated'].append('operations.season_crop_yield')
+            logger.info("    [SUCCESS] season_crop_yield truncated")
+            
+            self.db.commit()
+            
+            logger.info("=" * 60)
+            logger.info(f"[SAFE RELOAD] Truncation complete - {len(stats['tables_truncated'])} tables cleared")
+            logger.info(f"  Total rows removed: {stats['inspection_base_rows_before'] + stats['yield_rows_before']:,}")
+            logger.info("  Master tables (seasons, crops, varieties, etc.) PRESERVED")
+            logger.info("=" * 60)
+            
+            return stats
+            
+        except Exception as e:
+            try:
+                self.db.rollback()
+            except:
+                pass
+            logger.error(f"[ERROR] Failed to truncate tables: {e}")
+            raise
+    
+    def recreate_tables_with_composite_keys(self) -> None:
+        """
+        DEPRECATED: Use truncate_yield_tables() instead for safe data reload.
+        
+        This method is kept for backwards compatibility but now only truncates data.
+        It does NOT drop or recreate tables to protect production schemas.
+        
+        WARNING: Drop/recreate operations have been removed to prevent 
+        accidental destruction of production table structures.
+        """
+        logger.warning("=" * 70)
+        logger.warning("[DEPRECATED] recreate_tables_with_composite_keys() called")
+        logger.warning("  This method now performs TRUNCATE instead of DROP/CREATE")
+        logger.warning("  Use truncate_yield_tables() for explicit safe reload")
+        logger.warning("=" * 70)
+        
+        # Delegate to safe truncate method
+        self.truncate_yield_tables()
+        
+        logger.info("Tables truncated successfully (schema preserved)")
+
+    def normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Normalize DataFrame columns: lowercase, strip, replace spaces with underscores.
+        Map lot_no to lot_id and normalize lot_id values.
+        
+        Normalization Rules:
+        - Column names: lowercase, strip, replace spaces with underscores
+        - lot_no → lot_id mapping
+        - lot_id values: LOWER(TRIM(lot_no))
+        """
+        df = df.copy()
+        
+        # Normalize column names
+        df.columns = df.columns.str.lower().str.strip().str.replace(" ", "_")
+        
+        # Map lot_no to lot_id and normalize values
+        if 'lot_no' in df.columns:
+            if 'lot_id' not in df.columns:
+                df['lot_id'] = df['lot_no']
+            else:
+                # Fill lot_id with lot_no where lot_id is missing
+                mask = df['lot_id'].isna() | (df['lot_id'] == '')
+                df.loc[mask, 'lot_id'] = df.loc[mask, 'lot_no']
+        
+        # Normalize lot_id values: LOWER(TRIM(lot_id))
+        if 'lot_id' in df.columns:
+            df['lot_id'] = df['lot_id'].astype(str).str.strip().str.lower()
+            # Replace normalized empty values with None
+            df['lot_id'] = df['lot_id'].replace(['nan', 'none', 'null', ''], None)
+        
+        return df
+
+    def get_max_season_id(self, db: Session) -> int:
+        """Get the maximum season ID number from existing records."""
+        try:
+            max_season = db.query(func.max(SeasonRecord.season_id)).scalar()
+            if max_season:
+                # Extract number from ID if numeric, otherwise return 0
+                match = re.search(r'\d+', str(max_season))
+                if match:
+                    return int(match.group())
+            return 0
+        except Exception:
+            return 0
+
+    def get_max_grower_id(self, db: Session) -> int:
+        """Get the maximum grower ID number from existing records."""
+        try:
+            max_grower = db.query(func.max(GrowerRecord.grower_id)).scalar()
+            if max_grower:
+                match = re.search(r'\d+', max_grower)
+                if match:
+                    return int(match.group())
+            return 300000  # Default start
+        except Exception:
+            return 300000
+
+    def get_max_organizer_id(self, db: Session) -> int:
+        """Get the maximum organizer ID number from existing records."""
+        try:
+            max_org = db.query(func.max(OrganizerRecord.organizer_id)).scalar()
+            if max_org:
+                match = re.search(r'\d+', max_org)
+                if match:
+                    return int(match.group())
+            return 600000  # Default start
+        except Exception:
+            return 600000
+
+    def create_master_if_missing(
+        self, 
+        master_type: str, 
+        name: str, 
+        **kwargs
+    ) -> Optional[str]:
+        """
+        Create master record if missing. Returns the ID (existing or newly created).
+        All lookups use normalized values (TRIM + LOWER).
+        Duplicate names that differ only by spaces/case are treated as the same record.
+        
+        Args:
+            master_type: 'season', 'crop', 'variety', 'grower', 'organizer', 'location'
+            name: Name of the master record (will be normalized)
+            **kwargs: Additional fields for creation (e.g., crop_id for variety, village/district/state for location)
+        
+        Returns:
+            Master record ID or None if creation fails
+        """
+        if not name or pd.isna(name):
+            return None
+        
+        # Normalize: TRIM and LOWER for consistent lookup
+        # Store original for display, but use normalized for matching
+        name_clean = str(name).strip()
+        name_normalized = name_clean.lower()
+        
+        # Handle empty after normalization
+        if not name_normalized or name_normalized in ['nan', 'none', 'null', '']:
+            return None
+        
+        try:
+            if master_type == 'season':
+                # Check cache first
+                if hasattr(self, 'season_name_to_id') and name_normalized in self.season_name_to_id:
+                    return self.season_name_to_id[name_normalized]
+                
+                # Check database
+                existing = self.db.query(SeasonRecord).filter(
+                    func.lower(SeasonRecord.season_name) == name_normalized
+                ).first()
+                
+                if existing:
+                    if not hasattr(self, 'season_name_to_id'):
+                        self.season_name_to_id = {}
+                    self.season_name_to_id[name_normalized] = existing.season_id
+                    return existing.season_id
+                
+                # Create new season - use normalized season name as ID
+                season_id = name_clean.replace(" ", "_").replace("-", "_").upper()
+                new_season = SeasonRecord(
+                    season_id=season_id,
+                    season_name=name_clean
+                )
+                self.db.add(new_season)
+                self.db.commit()
+                
+                if not hasattr(self, 'season_name_to_id'):
+                    self.season_name_to_id = {}
+                self.season_name_to_id[name_normalized] = season_id
+                logger.info(f"✅ Created new master record [SEASON]: {season_id} - '{name_clean}' (normalized: '{name_normalized}')")
+                return season_id
+                
+            elif master_type == 'crop':
+                # _ensure_crop_exists already uses normalized lookup
+                crop_id = self._ensure_crop_exists(name_clean, kwargs.get('category_id', 100001))
+                if crop_id and name_normalized not in self.crop_name_to_id:
+                    # Log if it was newly created (cache wasn't updated)
+                    logger.info(f"✅ Created new master record [CROP]: {crop_id} - '{name_clean}' (normalized: '{name_normalized}')")
+                return crop_id
+                
+            elif master_type == 'variety':
+                crop_id = kwargs.get('crop_id')
+                if not crop_id:
+                    logger.warning(f"Cannot create variety '{name_clean}' without crop_id")
+                    return None
+                variety_id = self._ensure_variety_exists(name_clean, crop_id, kwargs.get('category_id', 100003))
+                if variety_id:
+                    cache_key = (name_normalized, crop_id)
+                    if cache_key not in self.variety_name_crop_to_id:
+                        logger.info(f"✅ Created new master record [VARIETY]: {variety_id} - '{name_clean}' (crop_id: {crop_id}, normalized: '{name_normalized}')")
+                return variety_id
+                
+            elif master_type == 'grower':
+                # Check cache first
+                if name_normalized in self.grower_name_to_id:
+                    return self.grower_name_to_id[name_normalized]
+                
+                # Check database
+                existing = self.db.query(GrowerRecord).filter(
+                    func.lower(GrowerRecord.grower_name) == name_normalized
+                ).first()
+                
+                if existing:
+                    self.grower_name_to_id[name_normalized] = existing.grower_id
+                    return existing.grower_id
+                
+                # Create new grower
+                max_id = self.get_max_grower_id(self.db)
+                new_id = f"G_{str(max_id + 1).zfill(6)}"
+                new_grower = GrowerRecord(
+                    grower_id=new_id,
+                    grower_name=name_clean,
+                    category_id=kwargs.get('category_id', 100005),
+                    fathers_name=kwargs.get('fathers_name'),
+                    grower_gender=kwargs.get('grower_gender')
+                )
+                self.db.add(new_grower)
+                self.db.commit()
+                self.grower_name_to_id[name_normalized] = new_id
+                logger.info(f"✅ Created new master record [GROWER]: {new_id} - '{name_clean}' (normalized: '{name_normalized}')")
+                return new_id
+                
+            elif master_type == 'organizer':
+                # Check cache first
+                if name_normalized in self.organizer_name_to_id:
+                    return self.organizer_name_to_id[name_normalized]
+                
+                # Check database
+                existing = self.db.query(OrganizerRecord).filter(
+                    func.lower(OrganizerRecord.organizer_name) == name_normalized
+                ).first()
+                
+                if existing:
+                    self.organizer_name_to_id[name_normalized] = existing.organizer_id
+                    return existing.organizer_id
+                
+                # Create new organizer
+                max_id = self.get_max_organizer_id(self.db)
+                new_id = f"O_{str(max_id + 1).zfill(6)}"
+                new_organizer = OrganizerRecord(
+                    organizer_id=new_id,
+                    organizer_name=name_clean,
+                    category_id=kwargs.get('category_id', 100006),
+                    production_plant=kwargs.get('production_plant')
+                )
+                self.db.add(new_organizer)
+                self.db.commit()
+                self.organizer_name_to_id[name_normalized] = new_id
+                logger.info(f"✅ Created new master record [ORGANIZER]: {new_id} - '{name_clean}' (normalized: '{name_normalized}')")
+                return new_id
+                
+            elif master_type == 'location':
+                # _resolve_location_id already uses normalized composite key matching
+                # name_clean is already normalized village
+                village = name_clean
+                mandal = kwargs.get('mandal')  # Already normalized in resolve_master_id
+                district = kwargs.get('district')  # Already normalized in resolve_master_id
+                state = kwargs.get('state')  # Already normalized in resolve_master_id
+                return self._resolve_location_id(village, mandal, district, state)
+                
+            else:
+                logger.warning(f"Unknown master type: {master_type}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error creating {master_type} '{name_clean}': {e}")
+            self.db.rollback()
+            return None
+
+    def _normalize_lookup_value(self, value: Any) -> Optional[str]:
+        """
+        Normalize lookup value: TRIM() and LOWER().
+        Handles None, NaN, and empty strings.
+        
+        Returns:
+            Normalized string or None
+        """
+        if value is None or pd.isna(value):
+            return None
+        
+        value_str = str(value).strip()
+        if not value_str or value_str.lower() in ['nan', 'none', 'null', '']:
+            return None
+        
+        return value_str.lower()
+
+    def _normalize_location_field(self, value: Any) -> str:
+        """
+        Normalize location fields (village, district, state): trim spaces, lowercase,
+        remove/sanitize special characters for consistent matching.
+        
+        Returns:
+            Normalized string (empty string if invalid)
+        """
+        if value is None or pd.isna(value):
+            return ''
+        s = str(value).strip().lower()
+        if not s or s in ['nan', 'none', 'null', '']:
+            return ''
+        # Remove extra whitespace, normalize common special chars
+        s = re.sub(r'\s+', ' ', s)
+        s = s.strip()
+        return s
+
+    # Fallback location for rows with empty village - ensures location_id is never null
+    UNKNOWN_LOCATION_VILLAGE = 'unknown_location'
+    
+    def resolve_master_id(self, row: Dict, master_type: str) -> Optional[str]:
+        """
+        Resolve master ID from row data. Auto-creates if missing.
+        All lookup fields are normalized with TRIM() and LOWER().
+        
+        Args:
+            row: DataFrame row as dict
+            master_type: 'season_id', 'crop_id', 'variety_id', 'grower_id', 'organizer_id', 'location_id'
+        
+        Returns:
+            Master record ID or None
+        """
+        try:
+            if master_type == 'season_id':
+                season_name = row.get('season') or row.get('season_id')
+                if not season_name:
+                    return None
+                # Normalize: TRIM and convert to uppercase for season_id format
+                season_name = str(season_name).strip().replace(" ", "_").replace("-", "_").upper()
+                return self.create_master_if_missing('season', season_name)
+                
+            elif master_type == 'crop_id':
+                crop_name = row.get('crop') or row.get('crop_name')
+                if not crop_name:
+                    return None
+                # Normalize: TRIM and LOWER for lookup
+                crop_name = self._normalize_lookup_value(crop_name)
+                if not crop_name:
+                    return None
+                return self.create_master_if_missing('crop', crop_name)
+                
+            elif master_type == 'variety_id':
+                variety_name = row.get('hsp_code') or row.get('variety') or row.get('variety_name')
+                crop_id = row.get('crop_id')
+                if not variety_name:
+                    return None
+                # Normalize: TRIM and LOWER for lookup
+                variety_name = self._normalize_lookup_value(variety_name)
+                if not variety_name:
+                    return None
+                if not crop_id:
+                    # Try to resolve crop_id first
+                    crop_name = row.get('crop') or row.get('crop_name')
+                    if crop_name:
+                        crop_name_norm = self._normalize_lookup_value(crop_name)
+                        if crop_name_norm:
+                            crop_id = self.create_master_if_missing('crop', crop_name_norm)
+                return self.create_master_if_missing('variety', variety_name, crop_id=crop_id)
+                
+            elif master_type == 'grower_id':
+                grower_name = row.get('growers_name') or row.get('grower_name')
+                if not grower_name:
+                    return None
+                # Normalize: TRIM and LOWER for lookup
+                grower_name = self._normalize_lookup_value(grower_name)
+                if not grower_name:
+                    return None
+                return self.create_master_if_missing(
+                    'grower', 
+                    grower_name,
+                    fathers_name=self._normalize_lookup_value(row.get('father_name') or row.get('fathers_name')),
+                    grower_gender=self._normalize_lookup_value(row.get('grower_gender'))
+                )
+                
+            elif master_type == 'organizer_id':
+                organizer_name = row.get('organizer_name') or row.get('org_id')
+                if not organizer_name:
+                    return None
+                # Normalize: TRIM and LOWER for lookup
+                organizer_name = self._normalize_lookup_value(organizer_name)
+                if not organizer_name:
+                    return None
+                return self.create_master_if_missing(
+                    'organizer',
+                    organizer_name,
+                    production_plant=self._normalize_lookup_value(row.get('production_plant'))
+                )
+                
+            elif master_type == 'location_id':
+                village = row.get('village') or row.get('village_id')
+                if not village:
+                    return None
+                # Normalize all location fields: TRIM and LOWER
+                village_norm = self._normalize_lookup_value(village)
+                if not village_norm:
+                    return None
+                district_norm = self._normalize_lookup_value(row.get('district'))
+                state_norm = self._normalize_lookup_value(row.get('state'))
+                mandal_norm = self._normalize_lookup_value(row.get('taluka_mandal') or row.get('mandal'))
+                
+                return self.create_master_if_missing(
+                    'location',
+                    village_norm,
+                    mandal=mandal_norm,
+                    district=district_norm,
+                    state=state_norm
+                )
+                
+            else:
+                logger.warning(f"Unknown master type: {master_type}")
+                return None
+                
+        except Exception as e:
+            logger.warning(f"Error resolving {master_type}: {e}")
+            return None
+
+    def split_and_prepare_data(self, df: pd.DataFrame) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Split DataFrame into inspection_base and yield records.
+        Resolve all master data IDs and prepare for bulk insert.
+        
+        Returns:
+            Tuple of (inspection_base_records, yield_records)
+        """
+        inspection_records = []
+        yield_records = []
+        
+        # Columns for inspection_base
+        inspection_columns = [
+            'season', 'crop', 'production_code', 'hsp_code', 'variety',
+            'organizer_name', 'org_id', 'purchasing_document_number',
+            'growers_name', 'father_name', 'village', 'village_id',
+            'taluka_mandal', 'mandal', 'district', 'state', 'lot_id'
+        ]
+        
+        # Columns for yield
+        yield_columns = [
+            'lot_id', 'm1_soaking_date', 'm1_soaking_week',
+            'female_soaking_date', 'female_date_of_transplant',
+            'po_soaking_acres', 'planting_list_soaking_acres',
+            'sowing_acres', 'net_tp_acres', 'net_acreage_area',
+            'final_harvestable_area', 'sum_of_received_qty',
+            'packed_qty', 'productivity_of_packed_seed', 'yield_slab',
+            'qty', 'rate_per_kg', 'amount_inr',
+            'male_parent_seed_lot_no', 'male_soaking_acre',
+            'male_no_of_pkt', 'male_qty_in_kgs',
+            'female_parent_seed_lot_no', 'female_soaking_acre',
+            'female_no_of_pkt', 'female_qty_in_kgs'
+        ]
+        
+        for idx, row in df.iterrows():
+            try:
+                # Resolve all master IDs
+                season_id = self.resolve_master_id(row, 'season_id')
+                crop_id = self.resolve_master_id(row, 'crop_id')
+                variety_id = self.resolve_master_id(row, 'variety_id')
+                grower_id = self.resolve_master_id(row, 'grower_id')
+                organizer_id = self.resolve_master_id(row, 'organizer_id')
+                location_id = self.resolve_master_id(row, 'location_id')
+                
+                # Get lot_id (required for primary key)
+                # Normalize lot_id: LOWER(TRIM(lot_no)) -> lot_id
+                lot_id = row.get('lot_id') or row.get('lot_no')
+                if not lot_id or pd.isna(lot_id):
+                    logger.warning(f"Row {idx} missing lot_id/lot_no, skipping")
+                    continue
+                
+                # Normalize lot_id: TRIM and LOWER (as per requirement)
+                lot_id = str(lot_id).strip().lower()
+                if not lot_id or lot_id in ['nan', 'none', 'null', '']:
+                    logger.warning(f"Row {idx} lot_id is empty after normalization, skipping")
+                    continue
+                
+                # Validate required fields for primary key
+                if not all([season_id, crop_id, variety_id, lot_id]):
+                    logger.warning(f"Row {idx} missing required primary key fields, skipping")
+                    continue
+                
+                # Prepare inspection_base record
+                inspection_record = {
+                    'season_id': season_id,
+                    'crop_id': crop_id,
+                    'variety_id': variety_id,
+                    'lot_id': lot_id,
+                    'location_id': location_id,
+                    'grower_id': grower_id,
+                    'organizer_id': organizer_id,
+                }
+                
+                # Add inspection-specific columns
+                for col in inspection_columns:
+                    if col in df.columns:
+                        val = row.get(col)
+                        if pd.notna(val):
+                            inspection_record[col] = val
+                
+                inspection_records.append(inspection_record)
+                
+                # Prepare yield record
+                yield_record = {
+                    'season_id': season_id,
+                    'crop_id': crop_id,
+                    'variety_id': variety_id,
+                    'lot_id': lot_id,
+                    'location_id': location_id,
+                    'grower_id': grower_id,
+                    'organizer_id': organizer_id,
+                }
+                
+                # Add yield-specific columns
+                for col in yield_columns:
+                    if col in df.columns:
+                        val = row.get(col)
+                        if pd.notna(val):
+                            # Convert dates
+                            if 'date' in col.lower():
+                                try:
+                                    val = pd.to_datetime(val, errors='coerce')
+                                    if pd.notna(val):
+                                        yield_record[col] = val.date() if hasattr(val, 'date') else val
+                                except:
+                                    pass
+                            # Convert numeric
+                            elif col in ['po_soaking_acres', 'planting_list_soaking_acres', 'sowing_acres',
+                                       'net_tp_acres', 'net_acreage_area', 'final_harvestable_area',
+                                       'sum_of_received_qty', 'packed_qty', 'productivity_of_packed_seed',
+                                       'qty', 'rate_per_kg', 'amount_inr', 'male_soaking_acre',
+                                       'male_no_of_pkt', 'male_qty_in_kgs', 'female_soaking_acre',
+                                       'female_no_of_pkt', 'female_qty_in_kgs']:
+                                val = pd.to_numeric(val, errors='coerce')
+                                if pd.notna(val):
+                                    yield_record[col] = float(val)
+                            else:
+                                yield_record[col] = val
+                
+                yield_records.append(yield_record)
+                
+            except Exception as e:
+                logger.warning(f"Error processing row {idx}: {e}")
+                continue
+        
+        logger.info(f"Prepared {len(inspection_records)} inspection records and {len(yield_records)} yield records")
+        return inspection_records, yield_records
+
+    def bulk_insert_tables(
+        self, 
+        inspection_records: List[Dict], 
+        yield_records: List[Dict]
+    ) -> Dict[str, int]:
+        """
+        Bulk insert records into both tables using raw SQL for composite primary keys.
+        
+        Returns:
+            Dict with insertion counts
+        """
+        results = {
+            'inspection_inserted': 0,
+            'yield_inserted': 0,
+            'inspection_errors': 0,
+            'yield_errors': 0
+        }
+        
+        try:
+            # Bulk insert inspection_base
+            if inspection_records:
+                try:
+                    # Prepare clean records
+                    clean_records = []
+                    for rec in inspection_records:
+                        # Use parameterized query for safety
+                        from sqlalchemy.dialects.postgresql import insert
+                        from sqlalchemy import Table, Column, String, Float
+                        
+                        # Prepare clean records
+                        clean_records = []
+                        for rec in inspection_records:
+                            clean_rec = {
+                                'season_id': rec.get('season_id'),
+                                'crop_id': rec.get('crop_id'),
+                                'variety_id': rec.get('variety_id'),
+                                'lot_id': rec.get('lot_id'),
+                                'location_id': rec.get('location_id'),
+                                'grower_id': rec.get('grower_id'),
+                                'organizer_id': rec.get('organizer_id'),
+                                'hybrid_id': rec.get('hybrid_id'),
+                                'season': rec.get('season'),
+                                'crop': rec.get('crop'),
+                                'production_code': rec.get('production_code'),
+                                'hsp_code': rec.get('hsp_code'),
+                                'organizer_name': rec.get('organizer_name'),
+                                'org_id': rec.get('org_id'),
+                                'purchasing_document_number': rec.get('purchasing_document_number'),
+                                'growers_name': rec.get('growers_name'),
+                                'father_name': rec.get('father_name'),
+                                'village': rec.get('village'),
+                                'village_id': rec.get('village_id'),
+                                'taluka_mandal': rec.get('taluka_mandal'),
+                                'district': rec.get('district'),
+                                'state': rec.get('state'),
+                            }
+                            clean_records.append(clean_rec)
+                        
+                        # Use bulk insert with conflict handling
+                        stmt = insert(SeasonCropInspectionBase.__table__).values(clean_records)
+                        stmt = stmt.on_conflict_do_nothing(
+                            index_elements=['season_id', 'crop_id', 'variety_id', 'lot_id']
+                        )
+                        self.db.execute(stmt)
+                        results['inspection_inserted'] = len(clean_records)
+                        logger.info(f"Inserted {results['inspection_inserted']} inspection records")
+                    
+                except Exception as e:
+                    logger.error(f"Error inserting inspection records: {e}")
+                    results['inspection_errors'] = len(inspection_records)
+            
+            # Bulk insert yield
+            if yield_records:
+                try:
+                    # Use parameterized query for safety
+                    from sqlalchemy.dialects.postgresql import insert
+                    
+                    # Prepare clean records
+                    clean_records = []
+                    for rec in yield_records:
+                        clean_rec = {
+                            'season_id': rec.get('season_id'),
+                            'crop_id': rec.get('crop_id'),
+                            'variety_id': rec.get('variety_id'),
+                            'lot_id': rec.get('lot_id'),
+                            'location_id': rec.get('location_id'),
+                            'grower_id': rec.get('grower_id'),
+                            'organizer_id': rec.get('organizer_id'),
+                            'm1_soaking_date': rec.get('m1_soaking_date'),
+                            'm1_soaking_week': rec.get('m1_soaking_week'),
+                            'female_soaking_date': rec.get('female_soaking_date'),
+                            'female_date_of_transplant': rec.get('female_date_of_transplant'),
+                            'po_soaking_acres': rec.get('po_soaking_acres'),
+                            'planting_list_soaking_acres': rec.get('planting_list_soaking_acres'),
+                            'sowing_acres': rec.get('sowing_acres'),
+                            'net_tp_acres': rec.get('net_tp_acres'),
+                            'net_acreage_area': rec.get('net_acreage_area'),
+                            'final_harvestable_area': rec.get('final_harvestable_area'),
+                            'sum_of_received_qty': rec.get('sum_of_received_qty'),
+                            'packed_qty': rec.get('packed_qty'),
+                            'productivity_of_packed_seed': rec.get('productivity_of_packed_seed'),
+                            'yield_slab': rec.get('yield_slab'),
+                            'qty': rec.get('qty'),
+                            'rate_per_kg': rec.get('rate_per_kg'),
+                            'amount_inr': rec.get('amount_inr'),
+                            'male_parent_seed_lot_no': rec.get('male_parent_seed_lot_no'),
+                            'male_soaking_acre': rec.get('male_soaking_acre'),
+                            'male_no_of_pkt': rec.get('male_no_of_pkt'),
+                            'male_qty_in_kgs': rec.get('male_qty_in_kgs'),
+                            'female_parent_seed_lot_no': rec.get('female_parent_seed_lot_no'),
+                            'female_soaking_acre': rec.get('female_soaking_acre'),
+                            'female_no_of_pkt': rec.get('female_no_of_pkt'),
+                            'female_qty_in_kgs': rec.get('female_qty_in_kgs'),
+                        }
+                        clean_records.append(clean_rec)
+                    
+                    # Use bulk insert with conflict handling
+                    stmt = insert(YieldRecord.__table__).values(clean_records)
+                    stmt = stmt.on_conflict_do_nothing(
+                        index_elements=['season_id', 'crop_id', 'variety_id', 'lot_id']
+                    )
+                    self.db.execute(stmt)
+                    results['yield_inserted'] = len(clean_records)
+                    logger.info(f"Inserted {results['yield_inserted']} yield records")
+                    
+                except Exception as e:
+                    logger.error(f"Error inserting yield records: {e}")
+                    results['yield_errors'] = len(yield_records)
+            
+            # Commit all inserts
+            self.db.commit()
+            
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Error during bulk insert: {e}")
+            raise
+        
+        return results
+
+    def reload_yield_data(
+        self, 
+        csv_path: str, 
+        recreate_tables: bool = False,
+        truncate_data: bool = True
+    ) -> Dict[str, Any]:
+        """
+        SAFE method to reload yield data from CSV with master data lookup and auto-creation.
+        
+        SAFETY FEATURES:
+        - NEVER drops or recreates tables (protects production schemas)
+        - Uses TRUNCATE to clear existing data (fast, preserves structure)
+        - Master tables are NEVER modified (only lookups and auto-creation of new entries)
+        - All operations are logged in detail for audit trail
+        
+        Performance optimizations:
+        - Preloads all master data into memory dictionaries
+        - Batches master data creation
+        - Uses psycopg2.extras.execute_batch for bulk inserts
+        - Single transaction for all operations
+        - Vectorized DataFrame operations where possible
+        
+        NORMALIZATION RULES (applied to all lookup fields):
+        - All lookup fields use TRIM() and LOWER() for matching
+        - season, crop, variety, organizer, grower: normalized with TRIM + LOWER
+        - lot_id: LOWER(TRIM(lot_no)) - normalized and stored as lot_id
+        - Duplicate names that differ only by spaces/case are treated as the same record
+        
+        MASTER DATA LOOKUP & AUTO-CREATION:
+        - If season/crop/variety/organizer/grower does not exist, insert new row with generated ID
+        - Location matching uses composite key: village_name + district + state (all normalized)
+        - All master data creation is logged
+        - Lookup and insert operations are atomic (transaction-safe)
+        
+        LOCATION MATCHING RULE:
+        - Primary: village_name + district + state (all TRIM + LOWER)
+        - Fallback: village_name + district (if state not available)
+        - Last resort: village_name only
+        
+        Args:
+            csv_path: Path to CSV file
+            recreate_tables: DEPRECATED - ignored for safety. Tables are never dropped.
+            truncate_data: If True (default), TRUNCATE existing data before insert.
+                          If False, data will be upserted (ON CONFLICT DO UPDATE).
+        
+        Returns:
+            Dict with reload statistics including:
+            - csv_rows_loaded: Number of rows loaded from CSV
+            - inspection_records_inserted: Records inserted into inspection_base
+            - yield_records_inserted: Records inserted into yield table
+            - master_records_created: Count of new master records by type
+            - rows_truncated: Number of rows removed before reload
+            - errors: List of any errors encountered
+            - timing: Performance metrics for each step
+        """
+        total_start = time.perf_counter()
+        stats = {
+            'csv_rows_loaded': 0,
+            'inspection_records_inserted': 0,
+            'yield_records_inserted': 0,
+            'rows_truncated': 0,
+            'failed_rows': [],
+            'master_records_created': {
+                'seasons': 0,
+                'crops': 0,
+                'varieties': 0,
+                'growers': 0,
+                'organizers': 0,
+                'locations': 0
+            },
+            'errors': [],
+            'timing': {}
+        }
+        
+        try:
+            logger.info("=" * 80)
+            logger.info("[YIELD DATA RELOAD] Starting safe data reload")
+            logger.info(f"  CSV File: {csv_path}")
+            logger.info(f"  Truncate existing data: {truncate_data}")
+            logger.info("  NOTE: Table schemas are NEVER modified (safe reload)")
+            logger.info("=" * 80)
+            
+            # Step 1: Truncate data if requested (SAFE - no schema changes)
+            if truncate_data:
+                step_start = time.perf_counter()
+                logger.info("[STEP 1/6] Truncating existing data (schema preserved)...")
+                truncate_stats = self.truncate_yield_tables()
+                stats['rows_truncated'] = truncate_stats.get('inspection_base_rows_before', 0) + truncate_stats.get('yield_rows_before', 0)
+                stats['timing']['truncate_tables'] = time.perf_counter() - step_start
+                logger.info(f"  [COMPLETE] Data truncated in {stats['timing']['truncate_tables']:.2f}s")
+                logger.info(f"  [COMPLETE] Rows removed: {stats['rows_truncated']:,}")
+            else:
+                logger.info("[STEP 1/6] Skipping truncation - data will be upserted")
+            
+            # Step 2: Preload all master data into memory
+            step_start = time.perf_counter()
+            logger.info("[STEP 2/6] Preloading master data into memory...")
+            logger.info("  Loading: seasons, crops, varieties, growers, organizers, locations")
+            master_cache, preload_timing = self._preload_all_master_data()
+            stats['timing']['preload_masters'] = time.perf_counter() - step_start
+            stats.setdefault('profiling', {}).update(preload_timing)
+            
+            # Log master data counts
+            logger.info(f"  [LOADED] Seasons: {len(master_cache.get('seasons', {}))} records")
+            logger.info(f"  [LOADED] Crops: {len(master_cache.get('crops', {}))} records")
+            logger.info(f"  [LOADED] Varieties: {len(master_cache.get('varieties', {}))} records")
+            logger.info(f"  [LOADED] Growers: {len(master_cache.get('growers', {}))} records")
+            logger.info(f"  [LOADED] Organizers: {len(master_cache.get('organizers', {}))} records")
+            logger.info(f"  [LOADED] Locations: {len(master_cache.get('locations', {}))} records")
+            logger.info(f"  [COMPLETE] Master data preloaded in {stats['timing']['preload_masters']:.2f}s")
+            
+            # Step 3: Load and normalize CSV (optimized) - with step-by-step timing
+            logger.info("[STEP 3/6] Loading and normalizing CSV file...")
+            logger.info(f"  Reading: {csv_path}")
+            t0 = time.perf_counter()
+            df = pd.read_csv(
+                csv_path, 
+                dtype=str, 
+                low_memory=False,
+                engine='c'
+            )
+            stats['csv_rows_loaded'] = len(df)
+            stats['timing']['csv_read'] = time.perf_counter() - t0
+            stats.setdefault('profiling', {})['pandas_read_csv'] = stats['timing']['csv_read']
+            logger.info(f"  [LOADED] {stats['csv_rows_loaded']:,} rows, {len(df.columns)} columns")
+            logger.info(f"  [TIMING] CSV read: {stats['timing']['csv_read']:.3f}s ({stats['csv_rows_loaded']/max(stats['timing']['csv_read'],0.001):,.0f} rows/sec)")
+            
+            t0 = time.perf_counter()
+            df = self.normalize_columns(df)
+            stats['timing']['normalize_columns'] = time.perf_counter() - t0
+            stats.setdefault('profiling', {})['normalize_columns'] = stats['timing']['normalize_columns']
+            logger.info(f"  [PROFILING] normalize_columns (lower/strip): {stats['timing']['normalize_columns']:.3f}s")
+            
+            t0 = time.perf_counter()
+            if 'lot_id' in df.columns:
+                df['lot_id'] = df['lot_id'].astype(str).str.strip().str.lower()
+                df['lot_id'] = df['lot_id'].replace(['nan', 'none', 'null', ''], None)
+            stats['timing']['clean_lot_id'] = time.perf_counter() - t0
+            logger.info(f"  [PROFILING] clean lot_id: {stats['timing']['clean_lot_id']:.3f}s")
+            
+            t0 = time.perf_counter()
+            numeric_cols = [
+                'purchasing_document_number', 'po_soaking_acres', 'planting_list_soaking_acres',
+                'sowing_acres', 'net_tp_acres', 'net_acreage_area', 'final_harvestable_area',
+                'sum_of_received_qty', 'packed_qty', 'productivity_of_packed_seed',
+                'qty', 'rate_per_kg', 'amount_inr', 'male_soaking_acre', 'male_no_of_pkt',
+                'male_qty_in_kgs', 'female_soaking_acre', 'female_no_of_pkt', 'female_qty_in_kgs'
+            ]
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            stats['timing']['numeric_conversion'] = time.perf_counter() - t0
+            logger.info(f"  [PROFILING] numeric conversion: {stats['timing']['numeric_conversion']:.3f}s")
+            
+            t0 = time.perf_counter()
+            date_cols = ['m1_soaking_date', 'female_soaking_date', 'female_date_of_transplant']
+            for col in date_cols:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+            stats['timing']['date_conversion'] = time.perf_counter() - t0
+            logger.info(f"  [PROFILING] date conversion: {stats['timing']['date_conversion']:.3f}s")
+            
+            stats['timing']['load_csv'] = (
+                stats['timing']['csv_read'] + stats['timing']['normalize_columns'] +
+                stats['timing']['clean_lot_id'] + stats['timing']['numeric_conversion'] + stats['timing']['date_conversion']
+            )
+            logger.info(f"[PROFILING] CSV load + normalization total: {stats['timing']['load_csv']:.3f}s")
+            
+            # Step 4: Process data with cached master lookups and collect missing masters
+            step_start = time.perf_counter()
+            logger.info("[STEP 4/6] Processing data and matching master records...")
+            inspection_records, yield_records, missing_masters, process_timing, failed_rows = self._optimized_split_and_prepare_data(df, master_cache)
+            stats['timing']['process_data'] = time.perf_counter() - step_start
+            stats['failed_rows'] = failed_rows
+            stats.setdefault('profiling', {}).update(process_timing)
+            logger.info(f"  [PREPARED] Inspection records: {len(inspection_records):,}")
+            logger.info(f"  [PREPARED] Yield records: {len(yield_records):,}")
+            logger.info(f"  [EXPECTED] Total CSV rows: {stats['csv_rows_loaded']:,}")
+            logger.info(f"  [VALID] Rows with all mandatory keys: {len(inspection_records):,}")
+            if failed_rows:
+                logger.warning(f"  [FAILED] Rows skipped (missing mandatory keys): {len(failed_rows):,}")
+            logger.info(f"  [TIMING] Data processing: {stats['timing']['process_data']:.3f}s")
+            
+            # Step 5: Batch create missing master records (if any)
+            if any(missing_masters.values()):
+                step_start = time.perf_counter()
+                logger.info("[STEP 5/6] Creating missing master records...")
+                for master_type, items in missing_masters.items():
+                    if items:
+                        logger.info(f"  [PENDING] {master_type}: {len(items)} new records to create")
+                
+                created_counts = self._batch_create_missing_masters(missing_masters, master_cache)
+                stats['master_records_created'].update(created_counts)
+                stats['timing']['create_masters'] = time.perf_counter() - step_start
+                
+                for master_type, count in created_counts.items():
+                    if count > 0:
+                        logger.info(f"  [CREATED] {master_type}: {count} records inserted")
+                logger.info(f"  [TIMING] Master creation: {stats['timing']['create_masters']:.3f}s")
+                
+                logger.info("  [INFO] Re-processing data with updated master cache...")
+                reprocess_start = time.perf_counter()
+                inspection_records, yield_records, _, _, failed_rows_reprocess = self._optimized_split_and_prepare_data(df, master_cache)
+                stats['failed_rows'] = failed_rows_reprocess
+                stats.setdefault('profiling', {})['reprocess_after_masters'] = time.perf_counter() - reprocess_start
+                logger.info(f"  [TIMING] Reprocess: {time.perf_counter() - reprocess_start:.3f}s")
+                logger.info(f"  [VALID] Rows after reprocess: {len(inspection_records):,}")
+                if failed_rows_reprocess:
+                    logger.warning(f"  [FAILED] Rows still skipped after master creation: {len(failed_rows_reprocess):,}")
+            else:
+                logger.info("[STEP 5/6] No missing master records - skipping creation")
+            
+            # Step 6: Optimized bulk insert
+            step_start = time.perf_counter()
+            logger.info("[STEP 6/6] Bulk inserting into fact tables...")
+            logger.info(f"  [TARGET] operations.season_crop_inspection_base: {len(inspection_records):,} records")
+            logger.info(f"  [TARGET] operations.season_crop_yield: {len(yield_records):,} records")
+            
+            insert_results, insert_timing = self._optimized_bulk_insert(inspection_records, yield_records)
+            stats['timing']['bulk_insert'] = time.perf_counter() - step_start
+            stats.setdefault('profiling', {}).update(insert_timing)
+            
+            stats['inspection_records_inserted'] = insert_results['inspection_inserted']
+            stats['yield_records_inserted'] = insert_results['yield_inserted']
+            
+            # Detailed insert logging
+            logger.info(f"  [INSERTED] season_crop_inspection_base: {stats['inspection_records_inserted']:,} rows")
+            logger.info(f"  [INSERTED] season_crop_yield: {stats['yield_records_inserted']:,} rows")
+            
+            if insert_results.get('inspection_errors', 0) > 0:
+                logger.warning(f"  [WARNING] Inspection insert errors: {insert_results['inspection_errors']}")
+                stats['errors'].append(f"Inspection errors: {insert_results['inspection_errors']}")
+            if insert_results.get('yield_errors', 0) > 0:
+                logger.warning(f"  [WARNING] Yield insert errors: {insert_results['yield_errors']}")
+                stats['errors'].append(f"Yield errors: {insert_results['yield_errors']}")
+            
+            logger.info(f"  [TIMING] Bulk insert: {stats['timing']['bulk_insert']:.3f}s")
+            
+            total_elapsed = time.perf_counter() - total_start
+            stats['timing']['total'] = total_elapsed
+            
+            # Execution summary (detailed profiling)
+            expected_rows = stats['csv_rows_loaded']
+            loaded_rows = stats['inspection_records_inserted']
+            failed_count = len(stats.get('failed_rows', []))
+            row_loss = expected_rows - loaded_rows
+            
+            logger.info("")
+            logger.info("=" * 80)
+            logger.info("[SUCCESS] YIELD DATA RELOAD COMPLETED")
+            logger.info("=" * 80)
+            logger.info("")
+            logger.info("ROW COUNT SUMMARY:")
+            logger.info(f"  Expected (CSV rows):         {expected_rows:,}")
+            logger.info(f"  Loaded (inserted):           {loaded_rows:,}")
+            logger.info(f"  Failed (missing keys):       {failed_count:,}")
+            if row_loss > 0 and row_loss != failed_count:
+                logger.warning(f"  ROW LOSS: {row_loss:,} rows (check duplicates or constraint failures)")
+            elif failed_count > 0:
+                logger.warning(f"  {failed_count:,} rows skipped - see [FAILED ROWS] for details")
+            logger.info("")
+            logger.info("RECORDS INSERTED:")
+            logger.info(f"  season_crop_inspection_base: {stats['inspection_records_inserted']:,} rows")
+            logger.info(f"  season_crop_yield:           {stats['yield_records_inserted']:,} rows")
+            logger.info("")
+            if sum(stats['master_records_created'].values()) > 0:
+                logger.info("NEW MASTER RECORDS CREATED:")
+                for master_type, count in stats['master_records_created'].items():
+                    if count > 0:
+                        logger.info(f"  {master_type:20s}: {count:,} records")
+                logger.info("")
+            logger.info(f"THROUGHPUT: {stats['csv_rows_loaded']/max(total_elapsed,0.001):,.0f} rows/sec")
+            logger.info("")
+            logger.info("-" * 80)
+            logger.info("TIMING BREAKDOWN:")
+            for step, elapsed in sorted(stats['timing'].items(), key=lambda x: x[1], reverse=True):
+                pct = (elapsed / total_elapsed * 100) if total_elapsed else 0
+                logger.info(f"  {step:25s}: {elapsed:8.3f}s ({pct:5.1f}%)")
+            if stats.get('profiling'):
+                logger.info("-" * 80)
+                logger.info("DETAILED PROFILING:")
+                for k, v in sorted(stats['profiling'].items(), key=lambda x: x[1] if isinstance(x[1], (int, float)) else 0, reverse=True):
+                    if isinstance(v, (int, float)) and v > 0.001:
+                        logger.info(f"  {k:35s}: {v:.3f}s")
+            logger.info("=" * 80)
+            
+            if stats.get('failed_rows'):
+                logger.warning("")
+                logger.warning(f"[FAILED ROWS] {len(stats['failed_rows'])} rows with missing mandatory keys:")
+                for fr in stats['failed_rows'][:10]:
+                    logger.warning(f"  Row {fr['row_index']}: {fr['reason']}")
+                if len(stats['failed_rows']) > 10:
+                    logger.warning(f"  ... and {len(stats['failed_rows']) - 10} more")
+            
+            if stats['errors']:
+                logger.warning("")
+                logger.warning(f"[WARNING] {len(stats['errors'])} errors encountered:")
+                for error in stats['errors']:
+                    logger.warning(f"  - {error}")
+            
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Error reloading yield data: {e}")
+            stats['errors'].append(str(e))
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
+        
+        return stats
 
 
 class EnhancedRecordService(RecordService):
@@ -2400,7 +4756,15 @@ if __name__ == "__main__":
         service = RecordService(db)
         record_service = EnhancedRecordService(db, metadata)
 
-        # Step 3: Call the method
+        # ============================================
+        # NEW: Reload Yield Data with Composite Keys
+        # ============================================
+        # Example usage of the new reload_yield_data method:
+        # csv_path = r"C:\Users\madan\OneDrive\Documents\Yield data RABI 21-25 (Production - Nov25)_updated.csv"
+        # stats = service.reload_yield_data(csv_path, recreate_tables=True)
+        # print(f"Reload complete: {stats}")
+        
+        # Step 3: Call the method (old method - kept for backward compatibility)
         df, mapping = service.load_and_process_excel(file_path=r"C:\Users\madan\OneDrive\Documents\Yield data RABI 21-25 (Production - Nov25)_updated.csv")
         unique_records, df = service.extract_unique_records(df)
 

@@ -12,6 +12,8 @@ from typing import Any, Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from crop_monitoring.satellite_pipeline.crop_indices_columns import normalize_s1_scatter_fields
+
 logger = logging.getLogger(__name__)
 
 _V3_UNIQUE_INDEX = {
@@ -24,6 +26,21 @@ _SATELLITE_SOURCE = {
     "sentinel2_indices": "S2",
     "sentinel3_indices": "S3",
 }
+
+# Lab / slim schema: never INSERT these (also skipped if absent from information_schema).
+_STRIPPED_INSERT_COLUMNS = frozenset({
+    "bands_missing",
+    "indices_missing",
+    "pipeline_version",
+    "valid_pixel_percentage",
+    "cloud_pixel_percentage",
+    "shadow_pixel_percentage",
+    "masked_pixel_percentage",
+    "usable_scene",
+    "product_id",
+    "scene_cloud_cover_pct",
+    "max_cloud_cover_pct",
+})
 
 
 def _table_exists(db: Session, table: str) -> bool:
@@ -47,6 +64,20 @@ def _column_exists(db: Session, table: str, column: str) -> bool:
         {"t": table, "c": column},
     ).fetchone()
     return row is not None
+
+
+def _filter_existing_columns(db: Session, table: str, cols: list[str]) -> list[str]:
+    """Only insert/update columns present on operations.{table} (lab DB may lag migrations)."""
+    wanted = [c for c in cols if c not in _STRIPPED_INSERT_COLUMNS]
+    existing = [c for c in wanted if _column_exists(db, table, c)]
+    skipped = [c for c in wanted if c not in existing]
+    if skipped:
+        logger.debug(
+            "sentinel_repositories: %s skipping absent columns: %s",
+            table,
+            ", ".join(skipped[:12]) + ("..." if len(skipped) > 12 else ""),
+        )
+    return existing
 
 
 def _uses_v3_unique(db: Session, table: str) -> bool:
@@ -138,6 +169,36 @@ def sentinel2_row_exists(
     return row is not None
 
 
+def _dedupe_cols(cols: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in cols:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
+def _ensure_conflict_columns(db: Session, table: str, cols: list[str]) -> list[str]:
+    """ON CONFLICT target columns must appear in INSERT."""
+    if _uses_v3_unique(db, table):
+        required = ["location_id", "season_id", "acquisition_date", "satellite_source"]
+    else:
+        required = ["location_id", "file_name", "season_id", "acquisition_date"]
+    merged = list(required) + cols
+    return _dedupe_cols([c for c in merged if _column_exists(db, table, c)])
+
+
+def _pick_update_cols(cols: list[str], candidates: list[str]) -> list[str]:
+    picked = [c for c in candidates if c in cols]
+    if picked:
+        return picked
+    for fallback in ("ndvi", "raw_observation_id", "file_name", "vv_db", "lst_celsius"):
+        if fallback in cols:
+            return [fallback]
+    return [cols[-1]] if cols else []
+
+
 def _build_upsert_sql(
     table: str,
     cols: list[str],
@@ -159,14 +220,18 @@ def _build_upsert_sql(
         else:
             value_exprs.append(f":{c}")
 
-    set_clause = ",\n                ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
+    if not update_cols:
+        update_cols = _pick_update_cols(cols, [])
+    set_parts = [f"{c} = EXCLUDED.{c}" for c in update_cols]
+    if _column_exists(db, table, "updated_at"):
+        set_parts.append("updated_at = NOW()")
+    set_clause = ",\n                ".join(set_parts) if set_parts else "id = EXCLUDED.id"
     return text(f"""
             INSERT INTO operations.{table} ({", ".join(cols)})
             VALUES ({", ".join(value_exprs)})
             ON CONFLICT {conflict}
             DO UPDATE SET
-                {set_clause},
-                updated_at = NOW()
+                {set_clause}
             RETURNING id
         """)
 
@@ -195,7 +260,8 @@ def upsert_sentinel2_indices(db: Session, data: dict[str, Any]) -> Optional[int]
     cols = [
         "location_id", "file_name", "season_id", "acquisition_date", "product_id",
         "scene_cloud_cover_pct", "max_cloud_cover_pct", "raw_observation_id",
-        "b01", "b02", "b03", "b04", "b05", "b06", "b07", "b08", "b8a", "b09", "b11", "b12",
+        "coastal", "blue", "green", "red", "rededge1", "rededge2", "rededge3",
+        "nir", "narrow_nir", "cirrus", "swir1", "swir2",
         "ndvi", "savi", "msavi", "evi", "lai", "gci", "ndre", "ndre2", "cire", "mcari",
         "ndmi", "ndwi", "ndwi_gao", "mndwi", "psri", "gndvi", "msi",
         "valid_pixel_percentage", "cloud_pixel_percentage", "shadow_pixel_percentage",
@@ -211,22 +277,40 @@ def upsert_sentinel2_indices(db: Session, data: dict[str, Any]) -> Optional[int]
     if _column_exists(db, "sentinel2_indices", "satellite_source"):
         cols.extend(["satellite_source", "cloud_coverage", "orbit_direction", "processing_level"])
 
-    if data.get("indices_missing") is None:
-        data["indices_missing"] = []
-    if data.get("bands_missing") is None:
-        data["bands_missing"] = []
+    cols = _ensure_conflict_columns(
+        db, "sentinel2_indices", _filter_existing_columns(db, "sentinel2_indices", cols)
+    )
+    if not cols:
+        logger.warning("sentinel2_indices: no matching columns for upsert")
+        return None
+
     params = {c: data.get(c) for c in cols}
     if params.get("index_sources") is not None and not isinstance(params["index_sources"], str):
         params["index_sources"] = json.dumps(params["index_sources"])
 
-    update_cols = [
-        "ndvi", "valid_pixel_percentage", "usable_scene", "quality_score",
-        "raw_observation_id", "index_sources", "bands_missing",
-    ]
-    if "grower_name" in cols:
-        update_cols.extend(["grower_name", "grower_id", "internal_id"])
-    if "cloud_coverage" in cols:
-        update_cols.append("cloud_coverage")
+    update_cols = _filter_existing_columns(
+        db,
+        "sentinel2_indices",
+        [
+            "ndvi",
+            "quality_score",
+            "raw_observation_id",
+            "index_sources",
+            "grower_name",
+            "grower_id",
+            "internal_id",
+            "cloud_coverage",
+            "file_name",
+            "coastal",
+            "blue",
+            "green",
+            "red",
+            "nir",
+            "swir1",
+            "swir2",
+        ],
+    )
+    update_cols = _pick_update_cols(cols, [c for c in update_cols if c in cols])
 
     r = db.execute(_build_upsert_sql("sentinel2_indices", cols, db, update_cols=update_cols), params)
     row = r.fetchone()
@@ -236,7 +320,7 @@ def upsert_sentinel2_indices(db: Session, data: dict[str, Any]) -> Optional[int]
 def upsert_sentinel1_indices(db: Session, data: dict[str, Any]) -> Optional[int]:
     if not _table_exists(db, "sentinel1_indices"):
         return None
-    data = _enrich_harvest_fields(dict(data), satellite="S1")
+    data = normalize_s1_scatter_fields(_enrich_harvest_fields(dict(data), satellite="S1"))
     _ensure_grower_on_data(db, data)
     cols = [
         "location_id", "file_name", "season_id", "acquisition_date", "product_id",
@@ -254,13 +338,33 @@ def upsert_sentinel1_indices(db: Session, data: dict[str, Any]) -> Optional[int]
     if not data.get("processing_level"):
         data["processing_level"] = "GRD"
 
+    cols = _ensure_conflict_columns(
+        db, "sentinel1_indices", _filter_existing_columns(db, "sentinel1_indices", cols)
+    )
+    if not cols:
+        logger.warning("sentinel1_indices: no matching columns for upsert")
+        return None
+
     params = {c: data.get(c) for c in cols}
     if params.get("index_sources") is not None and not isinstance(params["index_sources"], str):
         params["index_sources"] = json.dumps(params["index_sources"])
 
-    update_cols = ["vv_db", "vh_db", "vh_vv_ratio", "vv", "vh"]
-    if "grower_name" in cols:
-        update_cols.extend(["grower_name", "grower_id", "internal_id"])
+    update_cols = _filter_existing_columns(
+        db,
+        "sentinel1_indices",
+        [
+            "vv_db",
+            "vh_db",
+            "vh_vv_ratio",
+            "vv",
+            "vh",
+            "grower_name",
+            "grower_id",
+            "internal_id",
+            "file_name",
+        ],
+    )
+    update_cols = _pick_update_cols(cols, [c for c in update_cols if c in cols])
 
     r = db.execute(_build_upsert_sql("sentinel1_indices", cols, db, update_cols=update_cols), params)
     row = r.fetchone()
@@ -288,13 +392,33 @@ def upsert_sentinel3_indices(db: Session, data: dict[str, Any]) -> Optional[int]
     if not data.get("processing_level"):
         data["processing_level"] = "L1B"
 
+    cols = _ensure_conflict_columns(
+        db, "sentinel3_indices", _filter_existing_columns(db, "sentinel3_indices", cols)
+    )
+    if not cols:
+        logger.warning("sentinel3_indices: no matching columns for upsert")
+        return None
+
     params = {c: data.get(c) for c in cols}
     if params.get("index_sources") is not None and not isinstance(params["index_sources"], str):
         params["index_sources"] = json.dumps(params["index_sources"])
 
-    update_cols = ["lst_celsius", "lst_k", "s7", "s8", "s9"]
-    if "grower_name" in cols:
-        update_cols.extend(["grower_name", "grower_id", "internal_id"])
+    update_cols = _filter_existing_columns(
+        db,
+        "sentinel3_indices",
+        [
+            "lst_celsius",
+            "lst_k",
+            "s7",
+            "s8",
+            "s9",
+            "grower_name",
+            "grower_id",
+            "internal_id",
+            "file_name",
+        ],
+    )
+    update_cols = _pick_update_cols(cols, [c for c in update_cols if c in cols])
 
     r = db.execute(_build_upsert_sql("sentinel3_indices", cols, db, update_cols=update_cols), params)
     row = r.fetchone()

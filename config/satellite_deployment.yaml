@@ -1,0 +1,20 @@
+# Satellite harvest deployment defaults (override via CLI or env).
+season_id: RABI_25_26
+batch_strategy: quarterly
+expected_kml_count: 253
+s2_max_cloud_cover_pct: 60.0
+
+# Per-field pacing (avoid API rate limits)
+api_delay_seconds: 2.0
+max_retries_per_field: 2
+retry_backoff_seconds: 30.0
+
+# Logging
+log_level: INFO
+
+# Resume
+resume: true
+use_stac: true
+# false = daily S1/S3 for every calendar day in range (~108/field) — harvest default
+# true = S1/S3 only on S2 observation days (~20/field); lower PU, not full daily series
+s1_s3_on_s2_days_only: false

@@ -29,7 +29,36 @@ def _statistical_request(
     maxcc: float,
     resolution: int = 10,
 ) -> tuple[list[dict[str, Any]], Optional[dict]]:
-    """One Statistical API call; parse each daily interval with ``parser``."""
+    """One S2 L2A Statistical API call (backward-compatible wrapper)."""
+    rows, meta = statistical_request_daily(
+        geometry_geojson=geometry_geojson,
+        start_date=start_date,
+        end_date=end_date,
+        evalscript=evalscript,
+        parser=parser,
+        collection_type="sentinel-2-l2a",
+        maxcc=maxcc,
+        resolution=resolution,
+    )
+    meta["maxcc"] = maxcc
+    return rows, meta
+
+
+def statistical_request_daily(
+    *,
+    geometry_geojson: dict,
+    start_date: str,
+    end_date: str,
+    evalscript: str,
+    parser: Callable[[dict], dict[str, Any]],
+    collection_type: str,
+    maxcc: Optional[float] = None,
+    resolution: int = 10,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """
+    One Statistical API call with P1D aggregation for any CDSE collection type.
+    Returns (parsed_daily_rows, raw_meta).
+    """
     from crop_monitoring.sh_http_setup import configure_sh_http
     from crop_monitoring.statistical_client import _get_config
     from crop_monitoring.satellite_pipeline.layers.harmonize import iter_statistical_daily_items
@@ -43,12 +72,24 @@ def _statistical_request(
 
     config = _get_config()
     geom = Geometry(geometry_geojson, crs=CRS.WGS84)
-    maxcc_01 = float(maxcc) if 0 <= maxcc <= 1 else float(maxcc) / 100.0
 
-    try:
-        dc = DataCollection.SENTINEL2_L2A.define_from("s2l2a", service_url=config.sh_base_url)
-    except Exception:
-        dc = getattr(DataCollection, "SENTINEL2_L2A", DataCollection.SENTINEL2_L2A)
+    dc: Any = collection_type
+    ctype = collection_type.lower()
+    if ctype in ("sentinel-2-l2a", "s2l2a"):
+        try:
+            dc = DataCollection.SENTINEL2_L2A.define_from("s2l2a", service_url=config.sh_base_url)
+        except Exception:
+            dc = getattr(DataCollection, "SENTINEL2_L2A", DataCollection.SENTINEL2_L2A)
+    elif ctype in ("sentinel-1-grd", "s1grd"):
+        try:
+            dc = DataCollection.SENTINEL1_GRD.define_from("s1grd", service_url=config.sh_base_url)
+        except Exception:
+            dc = getattr(DataCollection, "SENTINEL1_GRD", "sentinel-1-grd")
+    elif ctype in ("sentinel-3-slstr", "s3slstr"):
+        try:
+            dc = DataCollection.SENTINEL3_SLSTR.define_from("s3slstr", service_url=config.sh_base_url)
+        except Exception:
+            dc = getattr(DataCollection, "SENTINEL3_SLSTR", "sentinel-3-slstr")
 
     aggregation = SentinelHubStatistical.aggregation(
         evalscript=evalscript,
@@ -56,7 +97,12 @@ def _statistical_request(
         aggregation_interval="P1D",
         resolution=(resolution, resolution),
     )
-    input_data = SentinelHubStatistical.input_data(dc, maxcc=maxcc_01)
+    if maxcc is not None:
+        maxcc_01 = float(maxcc) if 0 <= maxcc <= 1 else float(maxcc) / 100.0
+        input_data = SentinelHubStatistical.input_data(dc, maxcc=maxcc_01)
+    else:
+        input_data = SentinelHubStatistical.input_data(dc)
+
     request = SentinelHubStatistical(
         aggregation=aggregation,
         input_data=[input_data],
@@ -68,7 +114,8 @@ def _statistical_request(
     rows = [parser(item) for item in daily]
     return rows, {
         "interval": [start_date, end_date],
-        "maxcc": maxcc,
+        "collection_type": collection_type,
+        "resolution": resolution,
         "data": daily,
         "response": stats_list,
     }

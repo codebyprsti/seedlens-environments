@@ -1,0 +1,82 @@
+[
+  {
+    "village": "Kompally",
+    "district": "Medchal-Malkajgiri",
+    "state": "Telangana",
+    "mean_ndvi": 0.2255,
+    "cloud_free_pct": 100.0,
+    "area_ha": 117.83
+  },
+  {
+    "village": "Dundigal",
+    "district": "Medchal-Malkajgiri",
+    "state": "Telangana",
+    "mean_ndvi": 0.1795,
+    "cloud_free_pct": 100.0,
+    "area_ha": 117.83
+  },
+  {
+    "village": "Bachupally",
+    "district": "Medchal-Malkajgiri",
+    "state": "Telangana",
+    "mean_ndvi": 0.2321,
+    "cloud_free_pct": 100.0,
+    "area_ha": 471.2
+  },
+  {
+    "village": "Keesara",
+    "district": "Medchal-Malkajgiri",
+    "state": "Telangana",
+    "mean_ndvi": 0.3331,
+    "cloud_free_pct": 100.0,
+    "area_ha": 471.48
+  },
+  {
+    "village": "Ghatkesar",
+    "district": "Medchal-Malkajgiri",
+    "state": "Telangana",
+    "mean_ndvi": 0.3355,
+    "cloud_free_pct": 100.0,
+    "area_ha": 471.71
+  },
+  {
+    "village": "Uppal",
+    "district": "Medchal-Malkajgiri",
+    "state": "Telangana",
+    "mean_ndvi": 0.2368,
+    "cloud_free_pct": 100.0,
+    "area_ha": 471.72
+  },
+  {
+    "village": "Medchal",
+    "district": "Medchal-Malkajgiri",
+    "state": "Telangana",
+    "mean_ndvi": 0.2848,
+    "cloud_free_pct": 100.0,
+    "area_ha": 471.03
+  },
+  {
+    "village": "Alwal",
+    "district": "Medchal-Malkajgiri",
+    "state": "Telangana",
+    "mean_ndvi": 0.3074,
+    "cloud_free_pct": 100.0,
+    "area_ha": 471.41
+  },
+  {
+    "village": "Malkajgiri",
+    "district": "Medchal-Malkajgiri",
+    "state": "Telangana",
+    "mean_ndvi": 0.2969,
+    "cloud_free_pct": 100.0,
+    "area_ha": 471.58
+  },
+  {
+    "village": "Quthbullapur",
+    "district": "Medchal-Malkajgiri",
+    "state": "Telangana",
+    "mean_ndvi": 0.2831,
+    "cloud_free_pct": 100.0,
+    "area_ha": 471.36
+  }
+]
