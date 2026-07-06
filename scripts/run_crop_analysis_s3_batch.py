@@ -186,6 +186,69 @@ def list_kml_keys(s3_client, prefix: str | None = None):
         return sorted(keys)
 
 
+def _normalize_kml_basename(name: str) -> str:
+    s = name.replace("+", " ").strip()
+    return re.sub(r"\s+", " ", s).lower()
+
+
+def _s3_index_cache_path(prefix: str) -> Path:
+    safe = re.sub(r"[^a-zA-Z0-9]+", "_", (prefix or S3_PREFIX).strip("/"))[:120]
+    return _root / "tmp" / f"s3_kml_index_{safe}.json"
+
+
+def build_s3_basename_index(s3_client, prefix: str | None = None) -> dict[str, str]:
+    """Map KML basename -> full S3 key under prefix."""
+    use_prefix = (prefix or S3_PREFIX).rstrip("/").strip()
+    index: dict[str, str] = {}
+    for key in list_kml_keys(s3_client, use_prefix):
+        base = Path(key).name
+        index.setdefault(base, key)
+    return index
+
+
+def load_or_build_s3_basename_index(s3_client, prefix: str | None = None) -> dict[str, str]:
+    """Load cached basename index or build and persist it."""
+    import json
+
+    cache = _s3_index_cache_path(prefix or S3_PREFIX)
+    if cache.is_file():
+        try:
+            data = json.loads(cache.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and data:
+                logger.info("Loaded S3 basename index from cache: %s (%d entries)", cache, len(data))
+                return {str(k): str(v) for k, v in data.items()}
+        except Exception as e:
+            logger.warning("Could not read S3 index cache %s: %s", cache, e)
+
+    index = build_s3_basename_index(s3_client, prefix)
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(index, indent=0), encoding="utf-8")
+        logger.info("Wrote S3 basename index cache: %s (%d entries)", cache, len(index))
+    except Exception as e:
+        logger.warning("Could not write S3 index cache: %s", e)
+    return index
+
+
+def resolve_s3_keys_for_basenames(
+    s3_client,
+    basenames: list[str],
+    *,
+    prefix: str | None = None,
+    basename_index: dict[str, str] | None = None,
+) -> list[str]:
+    """Resolve S3 object keys for KML basenames without listing the full bucket each run."""
+    index = basename_index or load_or_build_s3_basename_index(s3_client, prefix)
+    norm_to_base = {_normalize_kml_basename(b): b for b in index}
+    keys: list[str] = []
+    for raw in basenames:
+        norm = _normalize_kml_basename(raw)
+        base = norm_to_base.get(norm)
+        if base and base in index:
+            keys.append(index[base])
+    return keys
+
+
 def download_kml(s3_client, key: str, local_path: Path) -> None:
     try:
         from crop_monitoring.s3_file_loader import download_kml as s3_download
@@ -672,6 +735,14 @@ def main():
             "Whitespace is collapsed for comparison; use the real .kml name on disk when in doubt."
         ),
     )
+    parser.add_argument(
+        "--extend-dates",
+        action="store_true",
+        help=(
+            "Backfill a new date window for files already in crop_indices: skip file-level "
+            "'already ingested' gate; still skip duplicate observation days."
+        ),
+    )
     args = parser.parse_args()
 
     if args.log_file:
@@ -715,25 +786,43 @@ def main():
             aws_secret_access_key=creds["aws_secret_access_key"],
         )
         s3_prefix = args.prefix or S3_PREFIX
-        keys = list_kml_keys(s3_client, prefix=args.prefix)
-        total_files = len(keys)
-        print(f"S3 s3://{S3_BUCKET}/{s3_prefix}")
-        print(f"Found {total_files} KML file(s)")
+        if args.only_file:
+            allow_basenames = [
+                re.sub(r"\s+", " ", n.replace("+", " ").strip())
+                for n in args.only_file
+                if n and n.strip()
+            ]
+            basename_index = load_or_build_s3_basename_index(s3_client, s3_prefix)
+            keys = resolve_s3_keys_for_basenames(
+                s3_client,
+                allow_basenames,
+                prefix=s3_prefix,
+                basename_index=basename_index,
+            )
+            total_files = len(basename_index)
+            print(f"S3 s3://{S3_BUCKET}/{s3_prefix}")
+            print(f"Resolved {len(keys)} / {len(allow_basenames)} requested KML(s) via basename index")
+        else:
+            keys = list_kml_keys(s3_client, prefix=args.prefix)
+            total_files = len(keys)
+            print(f"S3 s3://{S3_BUCKET}/{s3_prefix}")
+            print(f"Found {total_files} KML file(s)")
 
     if args.limit is not None:
         keys = keys[: args.limit]
         print(f"Processing limit: {len(keys)} files")
 
-    if args.only_file:
+    if args.only_file and use_local:
         def _kml_basename_norm(p) -> str:
             name = p.name if hasattr(p, "name") else Path(str(p)).name
-            s = name.replace("+", " ").strip()
-            return re.sub(r"\s+", " ", s).lower()
+            return _normalize_kml_basename(name)
 
-        allow = {re.sub(r"\s+", " ", n.replace("+", " ").strip()).lower() for n in args.only_file if n and n.strip()}
+        allow = {_normalize_kml_basename(n) for n in args.only_file if n and n.strip()}
         before = len(keys)
         keys = [k for k in keys if _kml_basename_norm(k) in allow]
         print(f"--only-file filter: {before} -> {len(keys)} file(s)")
+    elif args.only_file and not use_local:
+        print(f"--only-file: using {len(keys)} resolved S3 key(s)")
 
     path_disp = str(Path(args.local_dir).resolve()) if use_local else (args.prefix or S3_PREFIX)
     logger.info("Run start: mode=%s path=%s kml_count=%d", args.mode, path_disp, len(keys))
@@ -831,6 +920,8 @@ def main():
         crop_indices_row_exists,
         crop_indices_observation_exists,
         crop_indices_file_processed_for_season,
+        kml_file_name_for_storage,
+        load_processed_file_keys_for_season,
     )
     from crop_monitoring.database.location_repository import get_field_location_row_by_centroid
     from crop_monitoring.insert_validator import (
@@ -846,27 +937,29 @@ def main():
     total_errors = 0
     failed_keys: list[str] = []
     start_wall = time.perf_counter()
+    processed_keys = load_processed_file_keys_for_season(db, run_season_id)
+    logger.info(
+        "Resumability: %d distinct file_name keys loaded for season %s",
+        len(processed_keys),
+        run_season_id,
+    )
 
     tmpdir_ctx = tempfile.TemporaryDirectory(prefix="crop_s3_kml_") if not use_local else nullcontext(Path("."))
     with tmpdir_ctx as tmpdir:
         tmp = Path(tmpdir) if not use_local else None
         for i, key in enumerate(keys, start=1):
             file_name = (key.name if hasattr(key, "name") else Path(key).name).replace("+", " ").strip()
+            store_file_name = kml_file_name_for_storage(file_name)
             print("---------------------------------")
             print(f"File {i}/{len(keys)}: {file_name}")
+            if store_file_name != file_name:
+                print(f"  DB file_name (no parentheses): {store_file_name}")
 
             # Clear any aborted transaction left by a prior file or swallowed DBAPIError in helpers.
             try:
                 db.rollback()
             except Exception:
                 pass
-
-            # Resumable checkpoint: skip if already processed for this season
-            if crop_indices_file_processed_for_season(db, file_name, run_season_id):
-                logger.info("Skipping already processed file: %s", file_name)
-                print("  Skipping file (already processed for season)")
-                total_skipped_already_processed += 1
-                continue
 
             if use_local:
                 local_path = key
@@ -928,7 +1021,7 @@ def main():
                     kml_name=placemark_name,
                     filename=file_name,
                     detected_location=detected_location,
-                    db_session=db,
+                    db_session=None,  # grower/variety resolved after location_id below
                     use_llm=False,
                 )
                 village = resolved.get("village")
@@ -996,17 +1089,36 @@ def main():
 
                 polygon_area = _polygon_area_ha(geojson)
 
-                if duplicate_file_ingested(
-                    db, season_id=run_season_id, location_id=str(loc_id), file_name=file_name
+                if (
+                    not args.extend_dates
+                    and duplicate_file_ingested(
+                        db, season_id=run_season_id, location_id=str(loc_id), file_name=store_file_name
+                    )
                 ):
                     logger.warning(
                         "[duplicate_file] SKIPPED: File already ingested — file=%s, location=%s, season=%s",
-                        file_name,
+                        store_file_name,
                         loc_id,
                         run_season_id,
                     )
+                    print("  Skipping file (already ingested for this location+season)")
                     print_validation_batch_summary(file_name, {**new_counters(), "duplicate_file": 1})
+                    total_skipped_already_processed += 1
                     continue
+                elif args.extend_dates and duplicate_file_ingested(
+                    db, season_id=run_season_id, location_id=str(loc_id), file_name=store_file_name
+                ):
+                    logger.info(
+                        "[extend_dates] File has prior rows — fetching new observations only: %s",
+                        store_file_name,
+                    )
+                    print("  Extend mode: backfilling new observation dates only")
+
+                # Release DB connection before long Copernicus calls (idle VPN/DB timeouts).
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
 
                 # S2 Statistical API only (daily indices + bands). LST/S3 and SAR/S1 are fetched
                 # per observation date for crop_indices rows (see day_metrics); season-wide S3/S1
@@ -1149,7 +1261,7 @@ def main():
                         _store_satellite_raw_row(
                             db,
                             location_id=loc_id,
-                            file_name=file_name,
+                            file_name=store_file_name,
                             source="copernicus_s2",
                             observation_date=None,
                             raw_response=(
@@ -1172,7 +1284,7 @@ def main():
                         _store_satellite_raw_row(
                             db,
                             location_id=loc_id,
-                            file_name=file_name,
+                            file_name=store_file_name,
                             source="copernicus_s2",
                             observation_date=None,
                             raw_response=(
@@ -1198,8 +1310,8 @@ def main():
                     _store_satellite_raw_row(
                         db,
                         location_id=loc_id,
-                        file_name=file_name,
-                        source="copernicus_lst",
+                            file_name=store_file_name,
+                            source="copernicus_lst",
                         observation_date=end_date,
                         raw_response={
                             "api": "process",
@@ -1224,8 +1336,8 @@ def main():
                     _store_satellite_raw_row(
                         db,
                         location_id=loc_id,
-                        file_name=file_name,
-                        source="copernicus_s1",
+                            file_name=store_file_name,
+                            source="copernicus_s1",
                         observation_date=end_date,
                         raw_response={
                             "api": "process",
@@ -1250,15 +1362,17 @@ def main():
                     # responses; the observation label day is analysis_date (used for LST/SAR keys).
                     date_start = analysis_date
                     date_end = obs.get("interval_to") or obs.get("interval_from") or analysis_date
-                    if crop_indices_row_exists(db, file_name, analysis_date, run_season_id):
+                    if crop_indices_row_exists(
+                        db, store_file_name, analysis_date, run_season_id, location_id=str(loc_id)
+                    ):
                         skipped_this_file += 1
-                        logger.warning("Skipping duplicate (file_name, analysis_date): %s, %s", file_name, analysis_date)
+                        logger.warning("Skipping duplicate (file_name, analysis_date): %s, %s", store_file_name, analysis_date)
                         continue
-                    if crop_indices_observation_exists(db, loc_id, date_start, var_id, file_name, run_season_id):
+                    if crop_indices_observation_exists(db, loc_id, date_start, var_id, store_file_name, run_season_id):
                         skipped_this_file += 1
                         logger.warning(
                             "Skipping duplicate (location_id, date_start, variety_id, file_name): %s, %s, %s, %s",
-                            loc_id, date_start, var_id, file_name,
+                            loc_id, date_start, var_id, store_file_name,
                         )
                         continue
                     ndmi_v = obs.get("NDMI")
@@ -1290,7 +1404,7 @@ def main():
                     new_id = insert_crop_indices(
                         db,
                         {
-                            "file_name": file_name,
+                            "file_name": store_file_name,
                             "analysis_date": analysis_date,
                             "location_id": loc_id,
                             "season_id": run_season_id,

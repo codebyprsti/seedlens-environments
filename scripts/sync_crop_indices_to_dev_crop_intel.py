@@ -64,10 +64,11 @@ METRIC_COLS = [
 ]
 
 
-def _upsert_sql() -> str:
+def _upsert_sql(*, all_season: bool = False) -> str:
     metric_sets = ",\n  ".join(f"{c} = EXCLUDED.{c}" for c in METRIC_COLS)
     metric_cols = ", ".join(METRIC_COLS)
     metric_select = ", ".join(f"o.{c}" for c in METRIC_COLS)
+    file_filter = "" if all_season else "o.file_name = ANY(:fns) AND"
     return f"""
 INSERT INTO dev_crop_intel.crop_indices (
   location_id,
@@ -91,8 +92,10 @@ SELECT
   o.file_name,
   o.extracted_grower AS grower_name
 FROM operations.crop_indices o
-WHERE o.file_name = ANY(:fns)
-  AND (:sid IS NULL OR o.season_id = :sid)
+WHERE {file_filter}
+  (:sid IS NULL OR o.season_id = :sid)
+  AND (:date_from IS NULL OR o.index_date >= CAST(:date_from AS date))
+  AND (:date_to IS NULL OR o.index_date <= CAST(:date_to AS date))
 ON CONFLICT (location_id, date_start, variety_id, file_name)
 DO UPDATE SET
   date_end = EXCLUDED.date_end,
@@ -114,6 +117,13 @@ def main() -> int:
         help="Sync the 8 processed missing_kmls file names (excludes empty KOTIHAL KML).",
     )
     parser.add_argument("--season-id", type=str, default="RABI_25_26")
+    parser.add_argument(
+        "--all-season",
+        action="store_true",
+        help="Upsert all operations.crop_indices rows for --season-id (optional date window).",
+    )
+    parser.add_argument("--date-from", type=str, default=None, metavar="YYYY-MM-DD")
+    parser.add_argument("--date-to", type=str, default=None, metavar="YYYY-MM-DD")
     parser.add_argument("--dry-run", action="store_true", help="Count source rows only; no write.")
     args = parser.parse_args()
 
@@ -123,8 +133,8 @@ def main() -> int:
     if args.file_names:
         file_names.extend(f.replace("+", " ").strip() for f in args.file_names)
     file_names = list(dict.fromkeys(file_names))
-    if not file_names:
-        print("Provide --file-name and/or --missing-kmls-batch", file=sys.stderr)
+    if not file_names and not args.all_season:
+        print("Provide --file-name, --missing-kmls-batch, or --all-season", file=sys.stderr)
         return 2
 
     from sqlalchemy import text
@@ -132,61 +142,73 @@ def main() -> int:
     from core.db import SessionLocal
 
     season_id = (args.season_id or "").strip() or None
+    date_from = (args.date_from or "").strip() or None
+    date_to = (args.date_to or "").strip() or None
     db = SessionLocal()
     try:
-        src = db.execute(
-            text(
-                """
-                SELECT file_name, COUNT(*) AS n
+        count_sql = """
+            SELECT COUNT(*) AS n, COUNT(DISTINCT file_name) AS files
+            FROM operations.crop_indices
+            WHERE (:sid IS NULL OR season_id = :sid)
+              AND (:date_from IS NULL OR index_date >= CAST(:date_from AS date))
+              AND (:date_to IS NULL OR index_date <= CAST(:date_to AS date))
+        """
+        params: dict = {
+            "fns": file_names or [],
+            "sid": season_id,
+            "date_from": date_from,
+            "date_to": date_to,
+        }
+        if not args.all_season:
+            count_sql = """
+                SELECT COUNT(*) AS n, COUNT(DISTINCT file_name) AS files
                 FROM operations.crop_indices
                 WHERE file_name = ANY(:fns)
                   AND (:sid IS NULL OR season_id = :sid)
-                GROUP BY file_name
-                ORDER BY file_name
-                """
-            ),
-            {"fns": file_names, "sid": season_id},
-        ).fetchall()
-        if not src:
-            print("No source rows in operations.crop_indices for given file_name(s).")
+                  AND (:date_from IS NULL OR index_date >= CAST(:date_from AS date))
+                  AND (:date_to IS NULL OR index_date <= CAST(:date_to AS date))
+            """
+        summary = db.execute(text(count_sql), params).mappings().first()
+        total_src = int(summary["n"] or 0)
+        n_files = int(summary["files"] or 0)
+        if total_src == 0:
+            print("No source rows in operations.crop_indices for given filter.")
             return 1
 
-        print("Source (operations.crop_indices):")
-        total_src = 0
-        for fn, n in src:
-            print(f"  {n:4d}  {fn}")
-            total_src += n
-        print(f"  Total: {total_src}")
+        window = ""
+        if date_from or date_to:
+            window = f" [{date_from or '...'} .. {date_to or '...'}]"
+        scope = "all files" if args.all_season else f"{len(file_names)} file(s)"
+        print(f"Source (operations.crop_indices): {total_src} rows, {n_files} files ({scope}{window})")
 
         if args.dry_run:
             return 0
 
-        before = db.execute(
-            text(
-                """
+        dev_count_sql = """
+            SELECT COUNT(*) FROM dev_crop_intel.crop_indices
+            WHERE (:sid IS NULL OR season_id = :sid)
+              AND (:date_from IS NULL OR observation_date >= CAST(:date_from AS date))
+              AND (:date_to IS NULL OR observation_date <= CAST(:date_to AS date))
+        """
+        if not args.all_season:
+            dev_count_sql = """
                 SELECT COUNT(*) FROM dev_crop_intel.crop_indices
                 WHERE file_name = ANY(:fns)
                   AND (:sid IS NULL OR season_id = :sid)
-                """
-            ),
-            {"fns": file_names, "sid": season_id},
-        ).scalar()
+                  AND (:date_from IS NULL OR observation_date >= CAST(:date_from AS date))
+                  AND (:date_to IS NULL OR observation_date <= CAST(:date_to AS date))
+            """
+        before = db.execute(text(dev_count_sql), params).scalar()
 
-        db.execute(text(_upsert_sql()), {"fns": file_names, "sid": season_id})
+        db.execute(text(_upsert_sql(all_season=args.all_season)), params)
         db.commit()
 
-        after = db.execute(
-            text(
-                """
-                SELECT COUNT(*) FROM dev_crop_intel.crop_indices
-                WHERE file_name = ANY(:fns)
-                  AND (:sid IS NULL OR season_id = :sid)
-                """
-            ),
-            {"fns": file_names, "sid": season_id},
-        ).scalar()
+        after = db.execute(text(dev_count_sql), params).scalar()
 
-        print(f"\ndev_crop_intel.crop_indices: {before} -> {after} rows (upserted {total_src} from operations)")
+        print(
+            f"\ndev_crop_intel.crop_indices{window}: {before} -> {after} rows "
+            f"(upserted {total_src} from operations)"
+        )
         return 0
     except Exception as e:
         db.rollback()
