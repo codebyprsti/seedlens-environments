@@ -13,6 +13,10 @@ from models.schemas.base import SupplyChainPlanningResponse
 
 router = APIRouter()
 
+
+def _is_all(value: Optional[str]) -> bool:
+    return bool(value) and str(value).strip().lower() == "all"
+
 @router.get("/supply-chain-planning/summary", response_model=List[Dict[str, Any]])
 async def get_supply_chain_planning_summary(
         db: Session = Depends(get_db),
@@ -372,8 +376,8 @@ def get_supply_chain_planning_detailed(
                 detail="plan_revision_version or season is required before crop"
             )
             
-        # Allow "All" to be passed for state without requiring crop
-        if state and state != "All":
+        # Allow ALL to be passed for state without requiring crop
+        if state and not _is_all(state):
             if not plan_revision_version and not season:
                 raise HTTPException(
                     status_code=400,
@@ -385,7 +389,7 @@ def get_supply_chain_planning_detailed(
                     detail="crop is required before state"
                 )
             
-        if variety and variety != "All" and ((not plan_revision_version and not season) or not crop):
+        if variety and not _is_all(variety) and ((not plan_revision_version and not season) or not crop):
             if not plan_revision_version and not season:
                 raise HTTPException(
                     status_code=400,
@@ -397,7 +401,7 @@ def get_supply_chain_planning_detailed(
                     detail="crop is required before variety"
                 )
             
-        if village and ((not plan_revision_version and not season) or not crop or not state or not variety):
+        if village and not _is_all(village) and ((not plan_revision_version and not season) or not crop or not state or not variety):
             missing = []
             if not plan_revision_version and not season:
                 missing.append("plan_revision_version or season")
@@ -485,8 +489,8 @@ def get_supply_chain_planning_detailed(
                     detail=f"Invalid variety '{variety}' for the given filters. Please check available varieties."
                 )
         
-        # Validate village - handle "All" for state and variety
-        if village:
+        # Validate village - skip sentinel ALL
+        if village and not _is_all(village):
             # Build village validation query based on state/variety filters
             village_query = f"SELECT DISTINCT village FROM operations.supply_chain_vs_yield_view WHERE {where_clause}"
             village_params = list(base_params)

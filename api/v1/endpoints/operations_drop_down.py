@@ -146,6 +146,133 @@ async def get_dropdown_options(
         logger.exception(f"[dropdown-options] Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching dropdown options: {str(e)}")
 
+@router.get("/supply-chain-planning/dropdown", response_model=Dict[str, Any])
+async def get_supply_chain_planning_dropdown_options(
+        plan_revision_version: Optional[str] = Query(default=None),
+        season: Optional[str] = Query(default=None),
+        crop: Optional[str] = Query(default=None),
+        state: Optional[str] = Query(default=None),
+        variety: Optional[str] = Query(default=None),
+        village: Optional[str] = Query(default=None),
+        db: Session = Depends(get_db)
+):
+    """
+    Cascading dropdown: plan_revision_version → season → crop → state → variety → village.
+    ALL is valid for state, variety, and village and does not filter that field.
+    """
+    try:
+        def normalize_param(value, param_name=None):
+            if not value:
+                return None
+            value_str = str(value).strip().lower()
+            placeholders = ["state", "variety", "village", "season", "crop", "none", "null", ""]
+            if value_str in placeholders:
+                logger.info(f"[supply-chain-planning-dropdown] Normalizing {param_name}='{value}' to None")
+                return None
+            return value
+
+        season = normalize_param(season, "season")
+        crop = normalize_param(crop, "crop")
+        state = normalize_param(state, "state")
+        variety = normalize_param(variety, "variety")
+        village = normalize_param(village, "village")
+
+        result = {}
+        state_normalized = str(state).strip().lower() if state else ""
+        variety_normalized = str(variety).strip().lower() if variety else ""
+
+        base_query = """
+            SELECT DISTINCT {column}
+            FROM operations_demo.supply_chain_vs_yield_view
+            WHERE {conditions}
+            AND {column} IS NOT NULL AND {column} != ''
+            ORDER BY {column}
+        """
+
+        if not plan_revision_version and not season and not crop and not state and not variety and not village:
+            query = base_query.format(column="plan_revision_version", conditions="1=1")
+            result["plan_revision_version"] = [r[0] for r in db.execute(text(query)).fetchall()]
+
+        elif plan_revision_version and not season:
+            query = base_query.format(
+                column="season",
+                conditions="TRIM(LOWER(plan_revision_version)) = TRIM(LOWER(:version))"
+            )
+            result["season"] = [r[0] for r in db.execute(text(query), {"version": plan_revision_version}).fetchall()]
+
+        elif plan_revision_version and season and not crop:
+            query = base_query.format(
+                column="crop",
+                conditions="TRIM(LOWER(plan_revision_version)) = TRIM(LOWER(:version)) AND TRIM(LOWER(season)) = TRIM(LOWER(:season))"
+            )
+            result["crop"] = [r[0] for r in db.execute(text(query), {
+                "version": plan_revision_version,
+                "season": season
+            }).fetchall()]
+
+        elif plan_revision_version and season and crop and not state:
+            query = base_query.format(
+                column="state",
+                conditions="TRIM(LOWER(plan_revision_version)) = TRIM(LOWER(:version)) AND TRIM(LOWER(season)) = TRIM(LOWER(:season)) AND TRIM(LOWER(crop)) = TRIM(LOWER(:crop))"
+            )
+            state_list = [r[0] for r in db.execute(text(query), {
+                "version": plan_revision_version,
+                "season": season,
+                "crop": crop
+            }).fetchall()]
+            result["state"] = ["ALL"] + state_list
+
+        elif plan_revision_version and season and crop and state and not variety:
+            conditions = (
+                "TRIM(LOWER(plan_revision_version)) = TRIM(LOWER(:version)) "
+                "AND TRIM(LOWER(season)) = TRIM(LOWER(:season)) "
+                "AND TRIM(LOWER(crop)) = TRIM(LOWER(:crop))"
+            )
+            params = {"version": plan_revision_version, "season": season, "crop": crop}
+            if state_normalized != "all":
+                conditions += " AND TRIM(LOWER(state)) = TRIM(LOWER(:state))"
+                params["state"] = state
+            query = base_query.format(column="variety", conditions=conditions)
+            variety_list = [r[0] for r in db.execute(text(query), params).fetchall()]
+            result["variety"] = ["ALL"] + variety_list
+
+        elif plan_revision_version and season and crop and state and variety and not village:
+            conditions_parts = [
+                "TRIM(LOWER(plan_revision_version)) = TRIM(LOWER(:version))",
+                "TRIM(LOWER(season)) = TRIM(LOWER(:season))",
+                "TRIM(LOWER(crop)) = TRIM(LOWER(:crop))",
+            ]
+            params = {"version": plan_revision_version, "season": season, "crop": crop}
+            if state_normalized != "all":
+                conditions_parts.append("TRIM(LOWER(state)) = TRIM(LOWER(:state))")
+                params["state"] = state
+            if variety_normalized != "all":
+                conditions_parts.append("TRIM(LOWER(variety)) = TRIM(LOWER(:variety))")
+                params["variety"] = variety
+            query = base_query.format(column="village", conditions=" AND ".join(conditions_parts))
+            village_list = [r[0] for r in db.execute(text(query), params).fetchall()]
+            result["village"] = ["ALL"] + village_list
+
+        elif plan_revision_version and season and crop and state and variety and village:
+            # Last cascade step — nothing further to return.
+            result = {}
+
+        else:
+            raise HTTPException(status_code=400, detail="Invalid parameter combination.")
+
+        logger.info(f"[supply-chain-planning-dropdown] Returning keys: {list(result.keys())}")
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"[supply-chain-planning-dropdown] Error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching supply chain planning dropdown options: {str(e)}"
+        )
+
+
 @router.get("/supply-chain-planning/versions", response_model=Dict[str, Any])
 async def get_all_supply_chain_versions(db: Session = Depends(get_db)):
     """
@@ -155,8 +282,8 @@ async def get_all_supply_chain_versions(db: Session = Depends(get_db)):
         query = text("""
             SELECT DISTINCT plan_revision_version, 
                    COUNT(*) as record_count,
-                   MAX(created_at) as latest_update
-            FROM operations.supply_chain_planning 
+                   NULL as latest_update
+            FROM operations_demo.supply_chain_vs_yield_view 
             WHERE plan_revision_version IS NOT NULL 
             GROUP BY plan_revision_version
             ORDER BY plan_revision_version DESC
