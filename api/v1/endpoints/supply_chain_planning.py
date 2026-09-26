@@ -17,6 +17,180 @@ router = APIRouter()
 def _is_all(value: Optional[str]) -> bool:
     return bool(value) and str(value).strip().lower() == "all"
 
+
+PCI_FORECAST_MARKER = "PCI"
+PCI_SCORE_KEYS = {
+    "syi", "biomass_score", "growth_score", "sync_index", "stress_score",
+    "structural_score", "moisture_score", "nitrogen_score", "heat_score",
+    "max_potential_yield", "ndvi_area", "ndvi_area_norm", "growth_rate_slope",
+    "growth_rate_norm", "ndvi_cv", "ndvi_mean", "ndvi_std", "structural_signal_avg",
+    "peak_ndvi", "ndvi_amplitude", "ndre_at_heading", "ndre_max",
+    "fss", "fss_peak_broadness", "fss_curve_roughness", "fss_vigor_asymmetry",
+    "fss_stress_flag", "season_days", "flowering_duration_days",
+    "days_booting_to_heading", "sar_data_points", "sar_unique_values",
+    "sync_n_observations",
+}
+
+
+def _is_pci_forecast(version: Optional[str]) -> bool:
+    return bool(version) and PCI_FORECAST_MARKER in str(version).upper()
+
+
+def _classify_pci_risk(syi, est_yield):
+    """Rebuild village/state risk from rolled-up SYI and yield (rice bands)."""
+    if syi is None:
+        return None, None
+    try:
+        syi_val = float(syi)
+    except (TypeError, ValueError):
+        return None, None
+    try:
+        yield_val = float(est_yield or 0)
+    except (TypeError, ValueError):
+        yield_val = 0.0
+    yield_txt = f"{yield_val:.0f}"
+    if syi_val >= 0.70:
+        return "no", f"No visible Risk — expected yield ≈ {yield_txt} kg/acre"
+    if syi_val >= 0.55:
+        return "low", f"Low Risk — expected yield ≈ {yield_txt} kg/acre"
+    if syi_val >= 0.40:
+        return "moderate", f"Moderate Risk — expected yield ≈ {yield_txt} kg/acre"
+    return "high", f"High Risk — expected yield ≈ {yield_txt} kg/acre"
+
+
+def _majority_or_mixed(value, distinct_n):
+    try:
+        n = int(distinct_n or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if n > 1:
+        return "mixed"
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+PCI_PASSTHROUGH_KEYS = (
+    "syi", "biomass_score", "growth_score", "sync_index", "stress_score",
+    "structural_score", "moisture_score", "nitrogen_score", "heat_score",
+    "max_potential_yield", "season_days", "ndvi_area", "ndvi_area_norm",
+    "growth_rate_slope", "growth_rate_norm", "ndvi_cv", "ndvi_mean", "ndvi_std",
+    "structural_signal_avg", "sar_data_points", "sar_unique_values", "fss",
+    "peak_ndvi", "ndvi_amplitude", "ndre_at_heading", "ndre_max",
+    "flowering_duration_days", "days_booting_to_heading", "sync_n_observations",
+)
+PCI_DATE_KEYS = (
+    "computed_at", "flowering_window_start", "flowering_window_end",
+    "sync_season_start_date", "sync_season_end_date", "heading_date", "booting_date",
+)
+SKIP_TOTAL_KEYS = PCI_SCORE_KEYS | {
+    "record_count", "latitude", "longitude",
+    "productivity", "estimated_cost_per_kg", "actual_productivity",
+}
+
+
+def _attach_pci_rollup(filtered_row, row_dict):
+    """Apply the same PCI text rule at every GROUP BY grain."""
+    for key in PCI_PASSTHROUGH_KEYS:
+        val = row_dict.get(key)
+        filtered_row[key] = None if val is None else round(safe_float_convert(val), 4)
+
+    filtered_row["fallback_used"] = bool(row_dict.get("fallback_used"))
+    filtered_row["sar_is_static"] = bool(row_dict.get("sar_is_static"))
+    filtered_row["sync_method"] = _majority_or_mixed(
+        row_dict.get("sync_method"), row_dict.get("sync_method_n")
+    )
+    filtered_row["fss_classification"] = _majority_or_mixed(
+        row_dict.get("fss_classification"), row_dict.get("fss_classification_n")
+    )
+    filtered_row["sync_dominant_driver"] = _majority_or_mixed(
+        row_dict.get("sync_dominant_driver"), row_dict.get("sync_dominant_driver_n")
+    )
+    rec_n = 0
+    try:
+        rec_n = int(row_dict.get("sync_recommendation_n") or 0)
+    except (TypeError, ValueError):
+        rec_n = 0
+    if rec_n > 1:
+        filtered_row["sync_recommendation"] = "Mixed sync status — open fields for detail"
+    else:
+        rec = row_dict.get("sync_recommendation")
+        filtered_row["sync_recommendation"] = str(rec).strip() if rec else None
+
+    for key in PCI_DATE_KEYS:
+        filtered_row[key] = row_dict.get(key)
+
+    risk_level, risk_label = _classify_pci_risk(
+        filtered_row.get("syi"),
+        filtered_row.get("productivity"),
+    )
+    filtered_row["risk_level"] = risk_level
+    filtered_row["risk_label"] = risk_label
+
+
+PCI_AGGREGATED_FIELDS = """
+            ,
+            AVG(syi) as syi,
+            AVG(biomass_score) as biomass_score,
+            AVG(growth_score) as growth_score,
+            AVG(sync_index) as sync_index,
+            AVG(stress_score) as stress_score,
+            AVG(structural_score) as structural_score,
+            AVG(moisture_score) as moisture_score,
+            AVG(nitrogen_score) as nitrogen_score,
+            AVG(heat_score) as heat_score,
+            AVG(max_potential_yield) as max_potential_yield,
+            AVG(season_days) as season_days,
+            AVG(ndvi_area) as ndvi_area,
+            AVG(ndvi_area_norm) as ndvi_area_norm,
+            AVG(growth_rate_slope) as growth_rate_slope,
+            AVG(growth_rate_norm) as growth_rate_norm,
+            AVG(ndvi_cv) as ndvi_cv,
+            AVG(ndvi_mean) as ndvi_mean,
+            AVG(ndvi_std) as ndvi_std,
+            AVG(structural_signal_avg) as structural_signal_avg,
+            AVG(sar_data_points) as sar_data_points,
+            AVG(sar_unique_values) as sar_unique_values,
+            AVG(fss) as fss,
+            AVG(peak_ndvi) as peak_ndvi,
+            AVG(ndvi_amplitude) as ndvi_amplitude,
+            AVG(ndre_at_heading) as ndre_at_heading,
+            AVG(ndre_max) as ndre_max,
+            AVG(flowering_duration_days) as flowering_duration_days,
+            AVG(days_booting_to_heading) as days_booting_to_heading,
+            AVG(sync_n_observations) as sync_n_observations,
+            BOOL_OR(
+                CASE
+                    WHEN fallback_used IS NULL THEN FALSE
+                    WHEN fallback_used::text IN ('true', 't', 'yes', '1', 'True', 'TRUE') THEN TRUE
+                    ELSE FALSE
+                END
+            ) as fallback_used,
+            BOOL_OR(
+                CASE
+                    WHEN sar_is_static IS NULL THEN FALSE
+                    WHEN sar_is_static::text IN ('true', 't', 'yes', '1', 'True', 'TRUE') THEN TRUE
+                    ELSE FALSE
+                END
+            ) as sar_is_static,
+            MODE() WITHIN GROUP (ORDER BY sync_method) as sync_method,
+            COUNT(DISTINCT NULLIF(BTRIM(sync_method::text), '')) as sync_method_n,
+            MODE() WITHIN GROUP (ORDER BY fss_classification) as fss_classification,
+            COUNT(DISTINCT NULLIF(BTRIM(fss_classification::text), '')) as fss_classification_n,
+            MODE() WITHIN GROUP (ORDER BY sync_dominant_driver) as sync_dominant_driver,
+            COUNT(DISTINCT NULLIF(BTRIM(sync_dominant_driver::text), '')) as sync_dominant_driver_n,
+            MODE() WITHIN GROUP (ORDER BY sync_recommendation) as sync_recommendation,
+            COUNT(DISTINCT NULLIF(BTRIM(sync_recommendation::text), '')) as sync_recommendation_n,
+            MAX(computed_at) as computed_at,
+            MIN(flowering_window_start) as flowering_window_start,
+            MAX(flowering_window_end) as flowering_window_end,
+            MIN(sync_season_start_date) as sync_season_start_date,
+            MAX(sync_season_end_date) as sync_season_end_date,
+            MIN(heading_date) as heading_date,
+            MIN(booting_date) as booting_date
+"""
+
 @router.get("/supply-chain-planning/summary", response_model=List[Dict[str, Any]])
 async def get_supply_chain_planning_summary(
         db: Session = Depends(get_db),
@@ -474,8 +648,8 @@ def get_supply_chain_planning_detailed(
         
         # Validate variety only if it's not "All" (case-insensitive)
         if variety and variety_normalized != "all":
-            # If state is "All", validate variety across all states
-            if state_normalized == "all":
+            # Missing state is the same as ALL: validate variety across all states
+            if not state or state_normalized == "all":
                 variety_query = f"SELECT DISTINCT variety FROM operations.supply_chain_vs_yield_view WHERE {where_clause} AND variety = %s"
                 variety_params = list(base_params) + [variety]
             else:
@@ -772,6 +946,8 @@ def get_supply_chain_planning_detailed(
             AVG(longitude) as longitude,
             AVG(latitude) as latitude
         """
+        if _is_pci_forecast(plan_revision_version):
+            aggregated_fields = aggregated_fields.rstrip() + PCI_AGGREGATED_FIELDS
         
         # Build GROUP BY clause - handle grower field specially
         group_by_parts = []
@@ -934,6 +1110,8 @@ def get_supply_chain_planning_detailed(
             filtered_row['longitude'] = round(safe_float_convert(row_dict.get('longitude', 0.0)), 2)
             filtered_row['latitude'] = round(safe_float_convert(row_dict.get('latitude', 0.0)), 2)
             filtered_row['record_count'] = int(round(safe_float_convert(row_dict.get('record_count', 1.0)), 0))  # record_count should be integer
+            if _is_pci_forecast(plan_revision_version):
+                _attach_pci_rollup(filtered_row, row_dict)
             
             processed_rows.append(filtered_row)
 
@@ -1019,8 +1197,9 @@ def get_supply_chain_planning_detailed(
                     # Skip non-metric fields that shouldn't be summed (like record_count, IDs, etc.)
                     # Also skip fields that are averages (like productivity, estimated_cost_per_kg, actual_productivity)
                     # These should be calculated as weighted averages or excluded from totals
-                    if key not in ['record_count']:
-                        numeric_fields.append(key)
+                    if key in SKIP_TOTAL_KEYS or isinstance(value, bool):
+                        continue
+                    numeric_fields.append(key)
             
             # Calculate totals for each numeric field
             for field_name in numeric_fields:
