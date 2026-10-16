@@ -27,7 +27,7 @@ class LLMClient:
     cfg = _get_llm_config()
     base_url = base_url or cfg.get("base_url", "")
     api_key = api_key or cfg.get("api_key", "")
-    self.model = model or cfg.get("model", "Meta-Llama-3.3-70B-Instruct")
+    self.model = model or cfg.get("model", "Qwen/Qwen2.5-72B-Instruct")
     try:
       self.client = openai.OpenAI(base_url=base_url, api_key=api_key)
       self.max_tokens = max_tokens

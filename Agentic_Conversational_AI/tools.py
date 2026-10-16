@@ -57,8 +57,15 @@ class LLMTool:
         """
         try:
             # Detect API type
-            is_ollama = "11434" in self.api_url or "ollama" in self.api_url.lower()
-            is_openai_compatible = "openai" in self.api_url.lower() or "sambanova" in self.api_url.lower() or self.api_key is not None
+            url_l = (self.api_url or "").lower()
+            is_ollama = "11434" in url_l or "ollama" in url_l
+            is_openai_compatible = (
+                "openai" in url_l
+                or "sambanova" in url_l
+                or "huggingface" in url_l
+                or "router.huggingface" in url_l
+                or self.api_key is not None
+            )
             
             if is_ollama:
                 # Ollama API format
@@ -104,11 +111,13 @@ class LLMTool:
                 
                 messages.append({"role": "user", "content": prompt})
                 
+                default_model = "Qwen/Qwen2.5-72B-Instruct" if "huggingface" in url_l else "Meta-Llama-3.3-70B-Instruct"
                 payload = {
-                    "model": self.model or "Meta-Llama-3.3-70B-Instruct",
+                    "model": self.model or default_model,
                     "messages": messages,
                     "temperature": 0.1,
-                    "top_p": 0.1
+                    "top_p": 0.1,
+                    "max_tokens": 800,
                 }
             else:
                 # Generic API format

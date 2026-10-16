@@ -75,13 +75,49 @@ def get_db_config() -> Optional[dict[str, str]]:
     }
 
 
+HF_ROUTER_URL = "https://router.huggingface.co/v1"
+HF_DEFAULT_MODEL = "Qwen/Qwen2.5-72B-Instruct"
+
+
+def _is_hf_token(key: str) -> bool:
+    return bool(key) and (key.startswith("hf_") or key.startswith("hf-"))
+
+
 def get_llm_config() -> dict[str, Any]:
-    """LLM URL, key, model from agentic config."""
+    """LLM URL, key, model. Hugging Face is the default; SambaNova only if LLM_PROVIDER=sambanova."""
     cfg = get_agentic_config()
+    provider = (
+        os.environ.get("LLM_PROVIDER")
+        or cfg.get("llm_provider")
+        or "huggingface"
+    ).strip().lower()
+    yaml_url = (os.environ.get("LLM_BASE_URL") or cfg.get("llm_api_url") or "").strip()
+    yaml_model = (os.environ.get("LLM_MODEL") or cfg.get("llm_model") or "").strip()
+    hf_key = (
+        os.environ.get("LLM_API_KEY")
+        or os.environ.get("HF_TOKEN")
+        or os.environ.get("HUGGINGFACE_API_KEY")
+        or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        or ""
+    ).strip()
+    yaml_key = (cfg.get("llm_api_key") or "").strip()
+    use_hf = provider not in ("sambanova", "samba")
+    if use_hf:
+        key = hf_key
+        if not key and _is_hf_token(yaml_key):
+            key = yaml_key
+        model = yaml_model
+        if not model or "Meta-Llama-3.3" in model or "sambanova" in model.lower():
+            model = HF_DEFAULT_MODEL
+        return {
+            "llm_api_url": yaml_url if "huggingface" in yaml_url.lower() else HF_ROUTER_URL,
+            "llm_api_key": key,
+            "llm_model": model,
+        }
     return {
-        "llm_api_url": (cfg.get("llm_api_url") or "").strip(),
-        "llm_api_key": (cfg.get("llm_api_key") or "").strip(),
-        "llm_model": (cfg.get("llm_model") or "").strip(),
+        "llm_api_url": yaml_url or "https://api.sambanova.ai/v1",
+        "llm_api_key": os.environ.get("SAMBANOVA_API_KEY", "").strip() or yaml_key,
+        "llm_model": yaml_model or "Meta-Llama-3.3-70B-Instruct",
     }
 
 

@@ -39,19 +39,18 @@ def _get_database_config():
 
 
 def _get_llm_config():
-    """
-    Get LLM config from agentic config.yaml only.
-    No environment variables used.
-    """
+    """Hugging Face router by default. SambaNova only if LLM_PROVIDER=sambanova."""
     if _agentic_llm_config:
         return {
-            'base_url': _agentic_llm_config.get("llm_api_url", "https://api.sambanova.ai/v1"),
+            'base_url': _agentic_llm_config.get("llm_api_url", "https://router.huggingface.co/v1"),
             'api_key': _agentic_llm_config.get("llm_api_key", ""),
-            'model': _agentic_llm_config.get("llm_model", "Meta-Llama-3.3-70B-Instruct")
+            'model': _agentic_llm_config.get("llm_model", "Qwen/Qwen2.5-72B-Instruct")
         }
-    
-    # Return None if config not available (will raise clear error when used)
-    return None
+    return {
+        'base_url': "https://router.huggingface.co/v1",
+        'api_key': "",
+        'model': "Qwen/Qwen2.5-72B-Instruct",
+    }
 
 
 # Load configs from config.yaml only

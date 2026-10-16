@@ -6,8 +6,11 @@ flask_host: 0.0.0.0
 flask_port: 5000
 flask_debug: false
 
-# LLM API Configuration
-llm_api_url: "http://your-llm-api-endpoint.com/generate"
+# LLM API Configuration (Hugging Face OpenAI-compatible router)
+llm_provider: huggingface
+llm_api_url: "https://router.huggingface.co/v1"
+llm_api_key: ""   # set HF_TOKEN in the environment instead of committing a key
+llm_model: "Qwen/Qwen2.5-72B-Instruct"
 
 # Database Configuration
 database:
